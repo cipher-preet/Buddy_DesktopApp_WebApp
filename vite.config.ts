@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // Relative asset paths so Electron can load the production build via file://
+  base: './',
   plugins: [react()],
   resolve: {
     alias: {
@@ -18,5 +20,6 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    host: '127.0.0.1',
   },
 });

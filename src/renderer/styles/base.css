@@ -2,9 +2,12 @@ body {
   color: var(--color-text);
   font-family: var(--font-sans);
   font-size: var(--font-size-md);
+  font-weight: var(--font-weight-regular);
   line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-normal);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1,
@@ -18,19 +21,30 @@ h1,
 h2,
 h3 {
   color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
 }
 
 h1 {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
 }
 
 h2 {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xl);
 }
 
 h3 {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  letter-spacing: inherit;
 }
 
 button:focus-visible,
@@ -41,12 +55,19 @@ a:focus-visible {
 
 #root {
   min-height: 100vh;
+  min-width: 0;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
 }
 
 .page-kicker {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
-  letter-spacing: 0;
+  letter-spacing: var(--letter-spacing-wide);
   text-transform: uppercase;
 }

@@ -58,11 +58,52 @@
   background: var(--color-primary-hover);
 }
 
+.toolbar-button--record {
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: #ffffff;
+  background: #1355ff;
+  box-shadow: none;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0;
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.toolbar-button--record:hover:not(:disabled) {
+  background: #0f4bf0;
+  box-shadow: none;
+  transform: none;
+}
+
+.toolbar-button--record:active:not(:disabled) {
+  background: #0c46e8;
+  transform: scale(0.98);
+}
+
+.toolbar-button--record:disabled {
+  cursor: progress;
+  opacity: 0.88;
+}
+
+.toolbar-button--record.is-loading {
+  gap: 8px;
+  padding-inline: 18px;
+}
+
 .search-field {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: min(420px, 46vw);
+  width: min(420px, 100%);
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 420px;
   min-height: var(--control-height);
   padding: 0 11px;
   border: 1px solid var(--color-border);
@@ -234,9 +275,19 @@
 
 .meeting-panel__content {
   display: grid;
+  min-height: 0;
   align-content: start;
   gap: 22px;
   padding: 20px;
+  overflow: auto;
+}
+
+.meeting-panel__content[data-tab='ai-chat'] {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .meeting-panel__content section {
@@ -252,6 +303,105 @@
 .meeting-panel__content p {
   color: #29405f;
   font-size: var(--font-size-sm);
+}
+
+.side-panel-meetings,
+.side-panel-share {
+  display: grid;
+  gap: 22px;
+}
+
+.side-panel-meetings__list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.side-panel-meeting-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-muted);
+}
+
+.side-panel-meeting-card strong {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.side-panel-meeting-card span,
+.side-panel-meeting-card small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.side-panel-share__actions {
+  display: grid;
+  gap: 8px;
+}
+
+.side-panel-share__actions button {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+}
+
+.side-panel-share__actions button:hover {
+  border-color: #c7d2fe;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.side-panel-share__note {
+  display: grid;
+  gap: 7px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.side-panel-share__note textarea {
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  font: inherit;
+  text-transform: none;
+  resize: vertical;
+}
+
+.side-panel-share__note textarea:focus {
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.side-panel-share__note span {
+  color: var(--color-text-soft);
+  font-weight: var(--font-weight-medium);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.side-panel-share__submit {
+  width: 100%;
 }
 
 .meeting-url-button {
@@ -297,20 +447,35 @@
   font-weight: var(--font-weight-semibold);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .search-field {
-    width: 100%;
-  }
-
-  .toolbar-button span {
-    display: none;
+    max-width: none;
   }
 
   .calendar-actions {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 640px) {
+  .toolbar-button span:not(:only-child) {
+    display: none;
+  }
+
+  .toolbar-button--record span {
+    display: inline;
+  }
 
   .collapsed-panel-rail {
-    right: 12px;
+    right: 10px;
+  }
+
+  .meeting-panel__content {
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .meeting-tabs {
+    gap: 12px;
   }
 }

@@ -3,28 +3,23 @@ import {
   FiArrowRight,
   FiCheckSquare,
   FiChevronDown,
-  FiCheckCircle,
-  FiClock,
   FiCreditCard,
   FiEdit2,
   FiFileText,
   FiFolder,
-  FiGlobe,
   FiHelpCircle,
   FiLogOut,
   FiMail,
   FiMessageSquare,
   FiSend,
-  FiShield,
-  FiStar,
   FiTag,
   FiTrash2,
-  FiUsers,
   FiX,
-  FiZap,
 } from 'react-icons/fi';
 
 import { useRaiseSupportTicketMutation, useSubmitFeedbackMutation } from '@/services/api';
+
+import { PlanDetailsModal } from './PlanDetailsModal';
 
 type SettingsPageProps = {
   onNavigateHome?: () => void;
@@ -33,29 +28,10 @@ type SettingsPageProps = {
 type AccountAction = 'plan' | 'feedback' | 'support';
 type FeedbackStep = 'details' | 'success';
 type SupportStep = 'hub' | 'ticket' | 'success';
-type BillingCycle = 'monthly' | 'quarterly';
-type PlanId = 'free' | 'pro' | 'business';
 
 type OptionItem = {
   id: string;
   label: string;
-};
-
-type DesktopPlan = {
-  id: PlanId;
-  name: string;
-  tagline: string;
-  badge?: string;
-  prices: Record<BillingCycle, string>;
-  cadence: Record<BillingCycle, string>;
-  limits: {
-    spaces: string;
-    notes: string;
-    tasks: string;
-    recordingHours: string;
-  };
-  features: string[];
-  languages: string[];
 };
 
 type CustomDropdownProps = {
@@ -85,88 +61,6 @@ const supportCategories: OptionItem[] = [
 ];
 
 const supportEmail = 'ps1535146@gmail.com';
-
-const billingOptions: { id: BillingCycle; label: string }[] = [
-  { id: 'monthly', label: 'Monthly' },
-  { id: 'quarterly', label: 'Quarterly' },
-];
-
-const plans: DesktopPlan[] = [
-  {
-    id: 'free',
-    name: 'Free',
-    tagline: 'Start organizing spaces, notes, and personal tasks.',
-    prices: {
-      monthly: '₹0',
-      quarterly: '₹0',
-    },
-    cadence: {
-      monthly: 'forever',
-      quarterly: 'forever',
-    },
-    limits: {
-      spaces: '3',
-      notes: '25',
-      tasks: '50',
-      recordingHours: '2 hrs',
-    },
-    features: ['Personal spaces', 'Basic notes and tasks', 'Limited meeting recording', 'Buddy AI chat preview'],
-    languages: ['English', 'Hindi'],
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    tagline: 'More recording, daily summaries, and smarter planning.',
-    badge: 'Popular',
-    prices: {
-      monthly: '₹299',
-      quarterly: '₹799',
-    },
-    cadence: {
-      monthly: 'per month',
-      quarterly: 'per quarter',
-    },
-    limits: {
-      spaces: '25',
-      notes: 'Unlimited',
-      tasks: 'Unlimited',
-      recordingHours: '40 hrs',
-    },
-    features: ['Daily briefing from your work', 'Goal monitor for spaces', 'Advanced AI chat with notes', 'Priority support'],
-    languages: ['English', 'Hindi', 'Tamil', 'Telugu', 'Bengali', 'Marathi'],
-  },
-  {
-    id: 'business',
-    name: 'Business',
-    tagline: 'Team-ready workflows, shared spaces, and full language access.',
-    badge: 'Best value',
-    prices: {
-      monthly: '₹799',
-      quarterly: '₹1,999',
-    },
-    cadence: {
-      monthly: 'per month',
-      quarterly: 'per quarter',
-    },
-    limits: {
-      spaces: 'Unlimited',
-      notes: 'Unlimited',
-      tasks: 'Unlimited',
-      recordingHours: 'Unlimited',
-    },
-    features: ['Team access and shared spaces', 'Unlimited recording', 'Business language pack', 'Admin-ready support'],
-    languages: ['English', 'Hindi', 'Tamil', 'Telugu', 'Bengali', 'Marathi', 'Gujarati', 'Kannada', 'Malayalam', 'Punjabi', 'Urdu'],
-  },
-];
-
-const compareRows = [
-  { label: 'Spaces', free: '3', pro: '25', business: 'Unlimited' },
-  { label: 'Recording', free: '2 hrs', pro: '40 hrs', business: 'Unlimited' },
-  { label: 'Languages', free: '2', pro: '6', business: '11' },
-  { label: 'Daily briefing', free: '-', pro: 'Yes', business: 'Yes' },
-  { label: 'Goal monitor', free: '-', pro: 'Yes', business: 'Yes' },
-  { label: 'Team access', free: '-', pro: '-', business: 'Yes' },
-];
 
 const CustomDropdown = ({ id, label, options, value, isOpen, onOpenChange, onChange }: CustomDropdownProps) => {
   const selectedOption = options.find((option) => option.id === value) ?? options[0];
@@ -242,7 +136,7 @@ const accountItems: {
     title: 'Plan',
     subtitle: 'View and manage subscription',
     value: 'Free',
-    icon: FiFileText,
+    icon: FiCreditCard,
     action: 'plan',
   },
   {
@@ -265,6 +159,7 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isPlanOpen, setIsPlanOpen] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [feedbackStep, setFeedbackStep] = useState<FeedbackStep>('details');
   const [isFeedbackTopicOpen, setIsFeedbackTopicOpen] = useState(false);
@@ -339,6 +234,11 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
   };
 
   const handleAccountAction = (action: AccountAction) => {
+    if (action === 'plan') {
+      setIsPlanOpen(true);
+      return;
+    }
+
     if (action === 'feedback') {
       resetFeedback();
       setIsFeedbackOpen(true);
@@ -530,6 +430,8 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
           </div>
         </div>
       </div>
+
+      {isPlanOpen ? <PlanDetailsModal currentPlanId="free" onClose={() => setIsPlanOpen(false)} /> : null}
 
       {isEditOpen ? (
         <div className="settings-modal-backdrop" role="presentation">

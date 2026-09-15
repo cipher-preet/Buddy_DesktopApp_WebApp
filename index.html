@@ -3,7 +3,60 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Personal Buddy</title>
+    <title>Buddy</title>
+    <style>
+      html,
+      body,
+      #root,
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #c5cedb transparent;
+      }
+
+      *::-webkit-scrollbar {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 6px;
+        height: 6px;
+        background: transparent;
+      }
+
+      *::-webkit-scrollbar-button,
+      *::-webkit-scrollbar-button:start:decrement,
+      *::-webkit-scrollbar-button:end:increment,
+      *::-webkit-scrollbar-button:vertical:start:decrement,
+      *::-webkit-scrollbar-button:vertical:end:increment,
+      *::-webkit-scrollbar-button:vertical:start:increment,
+      *::-webkit-scrollbar-button:vertical:end:decrement,
+      *::-webkit-scrollbar-button:horizontal:start:decrement,
+      *::-webkit-scrollbar-button:horizontal:end:increment,
+      *::-webkit-scrollbar-button:single-button,
+      *::-webkit-scrollbar-button:double-button {
+        -webkit-appearance: none;
+        display: block;
+        width: 0;
+        height: 0;
+        max-width: 0;
+        max-height: 0;
+        background: transparent;
+        border: 0;
+      }
+
+      *::-webkit-scrollbar-track,
+      *::-webkit-scrollbar-track-piece {
+        background: transparent;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        border: 0;
+        border-radius: 999px;
+        background: #c5cedb;
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        background: #a8b4c5;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

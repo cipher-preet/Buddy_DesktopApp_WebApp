@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { FiPhone, FiSmartphone } from 'react-icons/fi';
 import { FcGoogle } from 'react-icons/fc';
 
+import { BrandLogo } from '@/components/common/BrandLogo';
+
 type AuthPageProps = {
   onContinue: () => void;
 };
@@ -12,12 +14,7 @@ export const AuthPage = ({ onContinue }: AuthPageProps) => {
   return (
     <main className="auth-page" aria-label="Sign in">
       <header className="auth-topbar">
-        <span className="auth-logo" aria-label="Buddy">
-          <span />
-          <span />
-          <span />
-          <span />
-        </span>
+        <BrandLogo size="md" className="auth-brand" />
       </header>
 
       <section className="auth-layout">

@@ -22,19 +22,24 @@
   --color-purple: #8c6df3;
   --color-orange: #f59e0b;
 
-  /* Typography */
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-size-xs: 0.72rem;
+  /* Typography — Inter is the standard professional UI font used across modern SaaS */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-md: 0.9375rem;
-  --font-size-lg: 1rem;
-  --font-size-xl: 1.125rem;
-  --font-size-2xl: 1.35rem;
-  --line-height-tight: 1.2;
-  --line-height-base: 1.45;
+  --font-size-lg: 1.0625rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --line-height-tight: 1.25;
+  --line-height-base: 1.5;
+  --font-weight-regular: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
+  --letter-spacing-tight: -0.02em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.04em;
 
   /* Spacing */
   --space-1: 0.25rem;
@@ -64,6 +69,19 @@
   --meeting-panel-width: 430px;
   --header-height: 64px;
   --content-max-width: 880px;
+  --content-padding-x: 28px;
+  --content-padding-y: 24px;
   --control-height: 40px;
   --transition-base: 160ms ease;
+  --transition-smooth: 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/*
+  Breakpoints (use consistently in @media):
+  1280 — large desktop tighten
+  1100 — meeting panel overlay
+  900  — sidebar drawer
+  640  — compact phone / narrow window
+  480  — extra-compact
+*/

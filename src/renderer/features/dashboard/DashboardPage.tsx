@@ -7,6 +7,12 @@ import {
   FiUser,
 } from 'react-icons/fi';
 
+import {
+  CreateNoteModal,
+  CreateSpaceModal,
+  CreateTaskModal,
+} from './WorkspaceCreateModals';
+
 type Space = {
   id: string;
   name: string;
@@ -30,8 +36,9 @@ type Space = {
 };
 
 type ActiveSection = 'tasks' | 'notes';
+type CreateModal = 'space' | 'task' | 'note' | null;
 
-const spaces: Space[] = [
+const initialSpaces: Space[] = [
   {
     id: 'product',
     name: 'Product Planning',
@@ -459,15 +466,22 @@ const statusLabel = {
 } satisfies Record<Space['tasks'][number]['status'], string>;
 
 export const DashboardPage = () => {
-  const [selectedSpaceId, setSelectedSpaceId] = useState(spaces[0].id);
+  const [spaces, setSpaces] = useState<Space[]>(initialSpaces);
+  const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaces[0].id);
   const [activeSection, setActiveSection] = useState<ActiveSection>('tasks');
+  const [createModal, setCreateModal] = useState<CreateModal>(null);
   const [completedTaskIds, setCompletedTaskIds] = useState(
-    () => new Set(spaces.flatMap((space) => space.tasks.filter((task) => task.status === 'done').map((task) => task.id))),
+    () =>
+      new Set(
+        initialSpaces.flatMap((space) =>
+          space.tasks.filter((task) => task.status === 'done').map((task) => task.id),
+        ),
+      ),
   );
 
   const selectedSpace = useMemo(
     () => spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0],
-    [selectedSpaceId],
+    [selectedSpaceId, spaces],
   );
 
   const toggleTaskCompletion = (taskId: string) => {
@@ -484,6 +498,81 @@ export const DashboardPage = () => {
     });
   };
 
+  const createSpace = (payload: { name: string; description: string }) => {
+    const id = `space-${Date.now()}`;
+    const nextSpace: Space = {
+      id,
+      name: payload.name,
+      description: payload.description,
+      owner: 'Preet Kumar',
+      updatedAt: 'Just now',
+      tasks: [],
+      notes: [],
+    };
+
+    setSpaces((current) => [nextSpace, ...current]);
+    setSelectedSpaceId(id);
+    setActiveSection('tasks');
+    setCreateModal(null);
+  };
+
+  const createTask = (payload: {
+    title: string;
+    description: string;
+    dueDate: string;
+    priority: 'High' | 'Medium' | 'Low';
+  }) => {
+    const taskId = `task-${Date.now()}`;
+
+    setSpaces((current) =>
+      current.map((space) =>
+        space.id === selectedSpace.id
+          ? {
+              ...space,
+              updatedAt: 'Just now',
+              tasks: [
+                {
+                  id: taskId,
+                  title: payload.title,
+                  description: payload.description,
+                  dueDate: payload.dueDate,
+                  owner: 'Preet Kumar',
+                  priority: payload.priority,
+                  status: 'open',
+                },
+                ...space.tasks,
+              ],
+            }
+          : space,
+      ),
+    );
+    setActiveSection('tasks');
+    setCreateModal(null);
+  };
+
+  const createNote = (payload: { title: string; description: string }) => {
+    setSpaces((current) =>
+      current.map((space) =>
+        space.id === selectedSpace.id
+          ? {
+              ...space,
+              updatedAt: 'Just now',
+              notes: [
+                {
+                  id: `note-${Date.now()}`,
+                  title: payload.title,
+                  excerpt: payload.description,
+                },
+                ...space.notes,
+              ],
+            }
+          : space,
+      ),
+    );
+    setActiveSection('notes');
+    setCreateModal(null);
+  };
+
   return (
     <section className="home-workspace" aria-label="Home workspace">
       <aside className="spaces-panel" aria-label="Spaces">
@@ -492,7 +581,7 @@ export const DashboardPage = () => {
             <p>Workspace</p>
             <h2>Spaces</h2>
           </div>
-          <button type="button" aria-label="Create space">
+          <button type="button" aria-label="Create space" onClick={() => setCreateModal('space')}>
             <FiPlus aria-hidden="true" size={16} />
           </button>
         </div>
@@ -519,86 +608,146 @@ export const DashboardPage = () => {
       </aside>
 
       <div className="space-detail">
-        <div className="space-switch" role="tablist" aria-label="Space content">
-          <button
-            className="space-switch__button"
-            data-active={activeSection === 'tasks' ? 'true' : undefined}
-            type="button"
-            role="tab"
-            aria-selected={activeSection === 'tasks'}
-            onClick={() => setActiveSection('tasks')}
-          >
-            Tasks
-          </button>
-          <button
-            className="space-switch__button"
-            data-active={activeSection === 'notes' ? 'true' : undefined}
-            type="button"
-            role="tab"
-            aria-selected={activeSection === 'notes'}
-            onClick={() => setActiveSection('notes')}
-          >
-            Notes
-          </button>
+        <div className="space-detail__toolbar">
+          <div className="space-switch" role="tablist" aria-label="Space content">
+            <button
+              className="space-switch__button"
+              data-active={activeSection === 'tasks' ? 'true' : undefined}
+              type="button"
+              role="tab"
+              aria-selected={activeSection === 'tasks'}
+              onClick={() => setActiveSection('tasks')}
+            >
+              Tasks
+            </button>
+            <button
+              className="space-switch__button"
+              data-active={activeSection === 'notes' ? 'true' : undefined}
+              type="button"
+              role="tab"
+              aria-selected={activeSection === 'notes'}
+              onClick={() => setActiveSection('notes')}
+            >
+              Notes
+            </button>
+          </div>
+
+          {activeSection === 'tasks' ? (
+            <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
+              <FiPlus aria-hidden="true" size={15} />
+              New task
+            </button>
+          ) : (
+            <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
+              <FiPlus aria-hidden="true" size={15} />
+              New note
+            </button>
+          )}
         </div>
 
         <div className="space-sections">
           {activeSection === 'tasks' ? (
             <section className="workspace-card" aria-label="Tasks">
-              <div className="task-stack">
-                {selectedSpace.tasks.map((task) => {
-                  const isDone = completedTaskIds.has(task.id);
+              {selectedSpace.tasks.length === 0 ? (
+                <div className="home-empty-state">
+                  <span className="home-empty-state__icon">
+                    <FiCalendar aria-hidden="true" size={20} />
+                  </span>
+                  <h3>No tasks yet</h3>
+                  <p>Create a task manually to track work inside {selectedSpace.name}.</p>
+                  <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
+                    <FiPlus aria-hidden="true" size={15} />
+                    New task
+                  </button>
+                </div>
+              ) : (
+                <div className="task-stack">
+                  {selectedSpace.tasks.map((task) => {
+                    const isDone = completedTaskIds.has(task.id);
 
-                  return (
-                    <article className="task-card" data-status={isDone ? 'done' : task.status} key={task.id}>
-                      <label className="task-card__toggle" aria-label={`Mark ${task.title} done`}>
-                        <input
-                          type="checkbox"
-                          checked={isDone}
-                          onChange={() => toggleTaskCompletion(task.id)}
-                        />
-                        <span />
-                      </label>
-                      <div className="task-card__content">
-                        <h3>{task.title}</h3>
-                        <p>{task.description}</p>
-                        <div className="task-card__meta">
-                          <span>
-                            <FiCalendar aria-hidden="true" size={13} />
-                            {task.dueDate}
-                          </span>
-                          <span>
-                            <FiUser aria-hidden="true" size={13} />
-                            {task.owner}
-                          </span>
-                          <span data-priority={task.priority}>{task.priority}</span>
+                    return (
+                      <article className="task-card" data-status={isDone ? 'done' : task.status} key={task.id}>
+                        <label className="task-card__toggle" aria-label={`Mark ${task.title} done`}>
+                          <input
+                            type="checkbox"
+                            checked={isDone}
+                            onChange={() => toggleTaskCompletion(task.id)}
+                          />
+                          <span />
+                        </label>
+                        <div className="task-card__content">
+                          <h3>{task.title}</h3>
+                          <p>{task.description}</p>
+                          <div className="task-card__meta">
+                            <span>
+                              <FiCalendar aria-hidden="true" size={13} />
+                              {task.dueDate}
+                            </span>
+                            <span>
+                              <FiUser aria-hidden="true" size={13} />
+                              {task.owner}
+                            </span>
+                            <span data-priority={task.priority}>{task.priority}</span>
+                          </div>
                         </div>
-                      </div>
-                      <span className="task-card__status">{isDone ? 'Done' : statusLabel[task.status]}</span>
-                    </article>
-                  );
-                })}
-              </div>
+                        <span className="task-card__status">{isDone ? 'Done' : statusLabel[task.status]}</span>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           ) : (
             <section className="workspace-card" aria-label="Notes">
-              <div className="notes-stack">
-                {selectedSpace.notes.map((note) => (
-                  <article className="space-note" key={note.id}>
-                    <span className="space-note__icon">
-                      <FiFileText aria-hidden="true" size={16} />
-                    </span>
-                    <div>
-                      <h3>{note.title}</h3>
-                      <p>{note.excerpt}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
+              {selectedSpace.notes.length === 0 ? (
+                <div className="home-empty-state">
+                  <span className="home-empty-state__icon">
+                    <FiFileText aria-hidden="true" size={20} />
+                  </span>
+                  <h3>No notes yet</h3>
+                  <p>Capture ideas and decisions for {selectedSpace.name} with a manual note.</p>
+                  <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
+                    <FiPlus aria-hidden="true" size={15} />
+                    New note
+                  </button>
+                </div>
+              ) : (
+                <div className="notes-stack">
+                  {selectedSpace.notes.map((note) => (
+                    <article className="space-note" key={note.id}>
+                      <span className="space-note__icon">
+                        <FiFileText aria-hidden="true" size={16} />
+                      </span>
+                      <div>
+                        <h3>{note.title}</h3>
+                        <p>{note.excerpt}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </div>
       </div>
+
+      {createModal === 'space' ? (
+        <CreateSpaceModal onClose={() => setCreateModal(null)} onCreate={createSpace} />
+      ) : null}
+      {createModal === 'task' ? (
+        <CreateTaskModal
+          spaceName={selectedSpace.name}
+          onClose={() => setCreateModal(null)}
+          onCreate={createTask}
+        />
+      ) : null}
+      {createModal === 'note' ? (
+        <CreateNoteModal
+          spaceName={selectedSpace.name}
+          onClose={() => setCreateModal(null)}
+          onCreate={createNote}
+        />
+      ) : null}
     </section>
   );
 };
