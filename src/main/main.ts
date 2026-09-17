@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -163,6 +163,35 @@ const createMainWindow = () => {
     return { action: 'deny' };
   });
 
+  // Application menu is hidden, so wire common shortcuts manually.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') {
+      return;
+    }
+
+    const key = input.key.toLowerCase();
+    const hasReloadModifier = input.control || input.meta;
+
+    if (hasReloadModifier && !input.alt && key === 'r') {
+      event.preventDefault();
+      if (input.shift) {
+        mainWindow?.webContents.reloadIgnoringCache();
+      } else {
+        mainWindow?.webContents.reload();
+      }
+      return;
+    }
+
+    if (key === 'f5') {
+      event.preventDefault();
+      if (input.shift || input.control || input.meta) {
+        mainWindow?.webContents.reloadIgnoringCache();
+      } else {
+        mainWindow?.webContents.reload();
+      }
+    }
+  });
+
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
@@ -179,6 +208,7 @@ ipcMain.handle('app:get-info', (): AppInfo => {
 });
 
 void app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createMainWindow();
 
   app.on('activate', () => {

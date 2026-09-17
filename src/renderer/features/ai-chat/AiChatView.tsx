@@ -1,134 +1,379 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
+  FiAlertCircle,
   FiArrowUp,
   FiChevronDown,
   FiCopy,
   FiEdit2,
   FiFolder,
-  FiHash,
   FiRefreshCw,
   FiSearch,
-  FiThumbsDown,
-  FiThumbsUp,
-  FiTrash2,
+  FiX,
 } from 'react-icons/fi';
 import { RiRobot2Line } from 'react-icons/ri';
+
+import { useAppSelector } from '@/app/hooks';
+import { useToast } from '@/app/ToastProvider';
+import { ChatMarkdown } from '@/features/ai-chat/ChatMarkdown';
+import type { ChatThreadMessage } from '@/features/ai-chat/chatTypes';
+import {
+  formatHistoryMeta,
+  getChatErrorMessage,
+  groupChatSessions,
+  titleFromQuestion,
+} from '@/features/ai-chat/chatUtils';
+import {
+  useAskBuddyMutation,
+  useCreateChatSessionMutation,
+  useGetChatSessionsInfiniteQuery,
+  useLazyGetChatSessionByIdQuery,
+} from '@/services/chatApi';
+import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 
 type AiChatViewProps = {
   compact?: boolean;
 };
 
-type ContextItem = {
-  id: string;
-  title: string;
-  subtitle?: string;
-};
-
-const CONTEXT_CHANNELS: ContextItem[] = [{ id: 'channel-general', title: 'General' }];
-
-const CONTEXT_CONVERSATIONS: ContextItem[] = [
-  {
-    id: 'conv-1',
-    title: 'Data Analyst and Operations Roles',
-    subtitle: 'Today, Sep 15 11:48 AM',
-  },
-  {
-    id: 'conv-2',
-    title: 'Note',
-    subtitle: 'Sep 13 06:11 PM',
-  },
-  {
-    id: 'conv-3',
-    title: 'Greeting',
-    subtitle: 'Today, Sep 15 10:02 AM',
-  },
-];
-
-const CONTEXT_SPACES: ContextItem[] = [
-  { id: 'space-product', title: 'Product' },
-  { id: 'space-engineering', title: 'Engineering' },
-  { id: 'space-onboarding', title: 'Onboarding' },
-  { id: 'space-marketing', title: 'Marketing' },
-  { id: 'space-finance', title: 'Finance' },
+const SESSIONS_PAGE_SIZE = 20;
+const SUGGESTIONS = [
+  'Summarize my day',
+  'What tasks are still open?',
+  'Tell me about my notes',
 ];
 
 export const AiChatView = ({ compact = false }: AiChatViewProps) => {
+  const { showToast } = useToast();
+  const userId = useAppSelector((state) => state.auth.user?.userId);
+  const userName = useAppSelector((state) => state.auth.user?.name) || 'there';
+
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
   const [contextQuery, setContextQuery] = useState('');
-  const [selectedContextIds, setSelectedContextIds] = useState<string[]>([]);
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatThreadMessage[]>([]);
+  const [isThreadLoading, setIsThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+
+  const historyAnchorRef = useRef<HTMLDivElement>(null);
   const contextAnchorRef = useRef<HTMLDivElement>(null);
   const contextSearchRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  const sendingLockRef = useRef(false);
+
+  const {
+    data: sessionsData,
+    isLoading: isSessionsLoading,
+    isFetching: isSessionsFetching,
+    isError: isSessionsError,
+    error: sessionsError,
+    refetch: refetchSessions,
+    fetchNextPage: fetchNextSessionsPage,
+    hasNextPage: hasMoreSessions,
+    isFetchingNextPage: isFetchingMoreSessions,
+  } = useGetChatSessionsInfiniteQuery(
+    { userId: userId || '', limit: SESSIONS_PAGE_SIZE },
+    { skip: !userId },
+  );
+
+  const {
+    data: spacesData,
+    isLoading: isSpacesLoading,
+    isError: isSpacesError,
+    refetch: refetchSpaces,
+  } = useGetUserSpacesInfiniteQuery({ userId: userId || '', limit: 20 }, { skip: !userId });
+
+  const [createChatSession] = useCreateChatSessionMutation();
+  const [loadChatSession] = useLazyGetChatSessionByIdQuery();
+  const [askBuddy] = useAskBuddyMutation();
+
+  const sessions = useMemo(() => {
+    const items = sessionsData?.pages.flatMap((page) => page.chats) ?? [];
+    return [...items].sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+  }, [sessionsData]);
+
+  const historyGroups = useMemo(() => groupChatSessions(sessions), [sessions]);
+  const spaces = useMemo(
+    () => spacesData?.pages.flatMap((page) => page.spaces) ?? [],
+    [spacesData],
+  );
+
+  const selectedSpaceId = selectedSpaceIds[selectedSpaceIds.length - 1] ?? null;
+  const selectedSpaces = useMemo(
+    () =>
+      selectedSpaceIds
+        .map((id) => spaces.find((space) => space.id === id))
+        .filter((space): space is (typeof spaces)[number] => Boolean(space)),
+    [selectedSpaceIds, spaces],
+  );
+
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const headerTitle = useMemo(() => {
+    if (!activeSessionId) {
+      return 'New chat';
+    }
+
+    if (activeSession?.title && activeSession.title !== 'New chat') {
+      return activeSession.title;
+    }
+
+    const firstUserMessage = messages.find((message) => message.role === 'user' && message.content.trim());
+    return firstUserMessage ? titleFromQuestion(firstUserMessage.content) : 'New chat';
+  }, [activeSession, activeSessionId, messages]);
+
+  const sessionsErrorMessage = isSessionsError
+    ? getChatErrorMessage(sessionsError, 'Unable to load chat history')
+    : null;
+  const showSessionsInitialLoading = Boolean(userId) && isSessionsLoading && sessions.length === 0;
+  const showLanding = !isThreadLoading && !threadError && messages.length === 0 && !isSending;
+  const canSend = Boolean(draft.trim()) && !isSending && !isThreadLoading;
+  const lastAssistantIndex = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'assistant') {
+        return index;
+      }
+    }
+
+    return -1;
+  }, [messages]);
 
   useEffect(() => {
-    if (!isContextOpen) {
+    if (!isHistoryOpen && !isContextOpen) {
       return undefined;
     }
 
     const onPointerDown = (event: MouseEvent) => {
-      if (!contextAnchorRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (isHistoryOpen && !historyAnchorRef.current?.contains(target)) {
+        setIsHistoryOpen(false);
+      }
+      if (isContextOpen && !contextAnchorRef.current?.contains(target)) {
         setIsContextOpen(false);
       }
     };
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setIsHistoryOpen(false);
         setIsContextOpen(false);
       }
     };
 
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    window.setTimeout(() => contextSearchRef.current?.focus(), 0);
+
+    if (isContextOpen) {
+      window.setTimeout(() => contextSearchRef.current?.focus(), 0);
+    }
 
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [isContextOpen]);
+  }, [isContextOpen, isHistoryOpen]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, isSending, isThreadLoading]);
 
   const normalizedQuery = contextQuery.trim().toLowerCase();
-
-  const filteredChannels = useMemo(
-    () =>
-      CONTEXT_CHANNELS.filter((item) =>
-        normalizedQuery ? item.title.toLowerCase().includes(normalizedQuery) : true,
-      ),
-    [normalizedQuery],
-  );
-
-  const filteredConversations = useMemo(
-    () =>
-      CONTEXT_CONVERSATIONS.filter((item) =>
-        normalizedQuery
-          ? item.title.toLowerCase().includes(normalizedQuery) ||
-            (item.subtitle?.toLowerCase().includes(normalizedQuery) ?? false)
-          : true,
-      ),
-    [normalizedQuery],
-  );
-
   const filteredSpaces = useMemo(
     () =>
-      CONTEXT_SPACES.filter((item) =>
-        normalizedQuery ? item.title.toLowerCase().includes(normalizedQuery) : true,
+      spaces.filter((space) =>
+        normalizedQuery ? space.name.toLowerCase().includes(normalizedQuery) : true,
       ),
-    [normalizedQuery],
+    [normalizedQuery, spaces],
   );
 
-  const toggleContextItem = (id: string) => {
-    setSelectedContextIds((current) =>
+  const toggleSpaceContext = (id: string) => {
+    setSelectedSpaceIds((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
   };
 
-  const selectedLabels = useMemo(() => {
-    const catalog = [...CONTEXT_CHANNELS, ...CONTEXT_CONVERSATIONS, ...CONTEXT_SPACES];
-    return selectedContextIds
-      .map((id) => catalog.find((item) => item.id === id)?.title)
-      .filter((title): title is string => Boolean(title));
-  }, [selectedContextIds]);
+  const removeSpaceContext = (id: string) => {
+    setSelectedSpaceIds((current) => current.filter((item) => item !== id));
+  };
+
+  const resetComposer = () => {
+    setDraft('');
+    setIsContextOpen(false);
+    setIsHistoryOpen(false);
+    setThreadError(null);
+    setIsThreadLoading(false);
+    setIsSending(false);
+  };
+
+  const handleNewChat = () => {
+    setActiveSessionId(null);
+    setMessages([]);
+    resetComposer();
+    composerRef.current?.focus();
+  };
+
+  const handleSelectSession = async (sessionId: string) => {
+    if (!userId) {
+      showToast({
+        message: 'Please sign in again',
+        description: 'Your session is missing, so chat history cannot be opened.',
+        type: 'error',
+      });
+      return;
+    }
+
+    setActiveSessionId(sessionId);
+    setIsHistoryOpen(false);
+    setIsContextOpen(false);
+    setThreadError(null);
+    setIsThreadLoading(true);
+
+    try {
+      const data = await loadChatSession({ userId, sessionId }).unwrap();
+      setActiveSessionId(data.chat.id);
+      setMessages(data.messages);
+      if (data.chat.spaceId) {
+        setSelectedSpaceIds((current) =>
+          current.includes(data.chat.spaceId as string) ? current : [...current, data.chat.spaceId as string],
+        );
+      }
+    } catch (error) {
+      const message = getChatErrorMessage(error, 'Unable to load this chat');
+      setThreadError(message);
+      setMessages([]);
+      showToast({ message: 'Unable to load chat', description: message, type: 'error' });
+    } finally {
+      setIsThreadLoading(false);
+    }
+  };
+
+  const ensureActiveSession = async () => {
+    if (!userId) {
+      throw new Error('Please sign in again to continue.');
+    }
+
+    if (activeSessionId) {
+      return activeSessionId;
+    }
+
+    const session = await createChatSession({
+      userId,
+      ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+    }).unwrap();
+    setActiveSessionId(session.id);
+    return session.id;
+  };
+
+  const handleSend = async (text?: string, options?: { appendUser?: boolean }) => {
+    const trimmed = (text ?? draft).trim();
+    if (!trimmed || sendingLockRef.current || isSending || isThreadLoading || !userId) {
+      return;
+    }
+
+    sendingLockRef.current = true;
+    setDraft('');
+    setIsContextOpen(false);
+    setIsHistoryOpen(false);
+    setThreadError(null);
+
+    if (options?.appendUser !== false) {
+      const userMessage: ChatThreadMessage = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: trimmed,
+      };
+      setMessages((current) => [...current, userMessage]);
+    }
+    setIsSending(true);
+
+    let sessionId: string | null = activeSessionId;
+    try {
+      sessionId = await ensureActiveSession();
+    } catch {
+      sessionId = null;
+    }
+
+    try {
+      const result = await askBuddy({
+        userId,
+        question: trimmed,
+        ...(sessionId ? { chatId: sessionId } : {}),
+        ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+      }).unwrap();
+
+      if (result.chatId && result.chatId !== sessionId) {
+        setActiveSessionId(result.chatId);
+      }
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: result.answer?.trim() || 'Buddy did not return a response.',
+        },
+      ]);
+    } catch (error) {
+      const message = getChatErrorMessage(error, 'Buddy could not answer that question');
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: 'assistant',
+          content: message,
+          isError: true,
+        },
+      ]);
+      showToast({ message: 'Message failed', description: message, type: 'error' });
+    } finally {
+      sendingLockRef.current = false;
+      setIsSending(false);
+    }
+  };
+
+  const handleCopy = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      showToast({ message: 'Copied', type: 'success' });
+    } catch {
+      showToast({ message: 'Unable to copy', type: 'error' });
+    }
+  };
+
+  const handleEdit = (content: string) => {
+    setDraft(content);
+    composerRef.current?.focus();
+  };
+
+  const handleRegenerate = () => {
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user' && !message.isError);
+    if (!lastUserMessage || isSending) {
+      return;
+    }
+
+    let lastAssistantIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'assistant') {
+        lastAssistantIndex = index;
+        break;
+      }
+    }
+
+    if (lastAssistantIndex >= 0) {
+      setMessages(messages.slice(0, lastAssistantIndex));
+    }
+
+    void handleSend(lastUserMessage.content, { appendUser: false });
+  };
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void handleSend();
+    }
+  };
 
   return (
     <section
@@ -136,7 +381,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
       aria-label="AI Chat"
     >
       <header className="ai-chat-header">
-        <div className="ai-chat-history-anchor">
+        <div className="ai-chat-history-anchor" ref={historyAnchorRef}>
           <button
             className="ai-chat-title"
             type="button"
@@ -148,137 +393,181 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
             }}
           >
             <RiRobot2Line aria-hidden="true" size={18} />
-            <span>Greeting</span>
+            <span>{headerTitle}</span>
             <FiChevronDown aria-hidden="true" size={14} />
           </button>
 
           {isHistoryOpen ? (
             <div className="chat-history-popover" role="dialog" aria-label="Chat history">
-              <section>
-                <h2>Today</h2>
-                <button className="chat-history-item is-active" type="button">
-                  <strong>Greeting</strong>
-                  <span>8m ago</span>
-                </button>
-              </section>
+              {showSessionsInitialLoading ? (
+                <div className="ai-chat-inline-state" aria-busy="true">
+                  <span className="home-spinner" />
+                  <p>Loading chats…</p>
+                </div>
+              ) : null}
 
-              <section>
-                <h2>Past week</h2>
-                <button className="chat-history-item" type="button">
-                  <strong>Decisions Made</strong>
-                  <span>1d ago</span>
-                </button>
-                <button className="chat-history-item" type="button">
-                  <strong>Review Follow-up Tasks</strong>
-                  <span>5d ago</span>
-                </button>
-              </section>
+              {sessionsErrorMessage && sessions.length === 0 ? (
+                <div className="ai-chat-inline-state ai-chat-inline-state--error" role="alert">
+                  <FiAlertCircle aria-hidden="true" size={16} />
+                  <p>{sessionsErrorMessage}</p>
+                  <button className="home-retry-button" type="button" onClick={() => void refetchSessions()}>
+                    <FiRefreshCw aria-hidden="true" size={14} />
+                    Retry
+                  </button>
+                </div>
+              ) : null}
 
-              <section>
-                <h2>Older</h2>
-                <button className="chat-history-item" type="button">
-                  <strong>Learn about AI Chat</strong>
-                  <span>Sep 4</span>
+              {!showSessionsInitialLoading && !sessionsErrorMessage && sessions.length === 0 ? (
+                <div className="ai-chat-inline-state">
+                  <p>No chats yet</p>
+                  <span>Start a conversation and it will show up here.</span>
+                </div>
+              ) : null}
+
+              {historyGroups.map((group) => (
+                <section key={group.label}>
+                  <h2>{group.label}</h2>
+                  {group.sessions.map((session) => (
+                    <button
+                      className={`chat-history-item${session.id === activeSessionId ? ' is-active' : ''}`}
+                      type="button"
+                      key={session.id}
+                      onClick={() => void handleSelectSession(session.id)}
+                    >
+                      <strong>{session.title}</strong>
+                      <span>{formatHistoryMeta(session.updatedAt)}</span>
+                    </button>
+                  ))}
+                </section>
+              ))}
+
+              {hasMoreSessions ? (
+                <button
+                  className="home-load-more"
+                  type="button"
+                  disabled={isFetchingMoreSessions}
+                  onClick={() => void fetchNextSessionsPage()}
+                >
+                  {isFetchingMoreSessions ? 'Loading…' : 'Load more'}
                 </button>
-              </section>
+              ) : null}
+
+              {isSessionsFetching && !isSessionsLoading && !isFetchingMoreSessions ? (
+                <p className="home-sync-hint">Refreshing…</p>
+              ) : null}
             </div>
           ) : null}
         </div>
-        <button className="ai-chat-new" type="button">
+        <button className="ai-chat-new" type="button" onClick={handleNewChat} disabled={isSending}>
           <FiEdit2 aria-hidden="true" size={16} />
           <span>New</span>
         </button>
       </header>
 
       <div className="ai-chat-scroll">
-        <div className="ai-chat-thread">
-          <article className="chat-turn chat-turn--user">
-            <div className="chat-bubble">hi</div>
-            <div className="chat-message-actions" aria-label="Message actions">
-              <button type="button" aria-label="Copy message">
-                <FiCopy aria-hidden="true" size={15} />
+        {isThreadLoading ? (
+          <div className="ai-chat-inline-state ai-chat-inline-state--page" aria-busy="true">
+            <span className="home-spinner" />
+            <p>Loading conversation…</p>
+          </div>
+        ) : null}
+
+        {threadError && !isThreadLoading ? (
+          <div className="ai-chat-inline-state ai-chat-inline-state--page ai-chat-inline-state--error" role="alert">
+            <FiAlertCircle aria-hidden="true" size={16} />
+            <p>{threadError}</p>
+            {activeSessionId ? (
+              <button
+                className="home-retry-button"
+                type="button"
+                onClick={() => void handleSelectSession(activeSessionId)}
+              >
+                <FiRefreshCw aria-hidden="true" size={14} />
+                Retry
               </button>
-              <button type="button" aria-label="Edit message">
-                <FiEdit2 aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Delete message">
-                <FiTrash2 aria-hidden="true" size={15} />
-              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {showLanding ? (
+          <div className="ai-chat-empty">
+            <span className="ai-chat-empty__icon">
+              <RiRobot2Line aria-hidden="true" size={22} />
+            </span>
+            <h2>Hi {userName}</h2>
+            <p>Ask anything about your conversations, notes, and tasks.</p>
+            <div className="ai-chat-suggestions">
+              {SUGGESTIONS.map((suggestion) => (
+                <button key={suggestion} type="button" onClick={() => void handleSend(suggestion)}>
+                  {suggestion}
+                </button>
+              ))}
             </div>
-          </article>
+          </div>
+        ) : null}
 
-          <article className="chat-turn chat-turn--assistant">
-            <button className="thinking-toggle" type="button">
-              <span>Show thinking</span>
-              <FiChevronDown aria-hidden="true" size={14} />
-            </button>
-            <div className="assistant-message">
-              <p>Hi Preet! How can I help you today?</p>
-            </div>
-            <div className="assistant-actions" aria-label="Assistant response actions">
-              <button type="button" aria-label="Copy response">
-                <FiCopy aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Good response">
-                <FiThumbsUp aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Bad response">
-                <FiThumbsDown aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Regenerate response">
-                <FiRefreshCw aria-hidden="true" size={15} />
-              </button>
-            </div>
-          </article>
+        {!isThreadLoading && !threadError && messages.length > 0 ? (
+          <div className="ai-chat-thread">
+            {messages.map((message, index) => {
+              const isLastAssistant = message.role === 'assistant' && index === lastAssistantIndex;
 
-          <article className="chat-turn chat-turn--user">
-            <div className="chat-bubble">tell me about my notes</div>
-            <div className="chat-message-actions" aria-label="Message actions">
-              <button type="button" aria-label="Copy message">
-                <FiCopy aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Edit message">
-                <FiEdit2 aria-hidden="true" size={15} />
-              </button>
-              <button type="button" aria-label="Delete message">
-                <FiTrash2 aria-hidden="true" size={15} />
-              </button>
-            </div>
-          </article>
+              if (message.role === 'user') {
+                return (
+                  <article className="chat-turn chat-turn--user" key={message.id}>
+                    <div className="chat-bubble">{message.content}</div>
+                    <div className="chat-message-actions" aria-label="Message actions">
+                      <button type="button" aria-label="Copy message" onClick={() => void handleCopy(message.content)}>
+                        <FiCopy aria-hidden="true" size={15} />
+                      </button>
+                      <button type="button" aria-label="Edit message" onClick={() => handleEdit(message.content)}>
+                        <FiEdit2 aria-hidden="true" size={15} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              }
 
-          <article className="chat-turn chat-turn--assistant">
-            <button className="thinking-toggle" type="button">
-              <span>Show thinking</span>
-              <FiChevronDown aria-hidden="true" size={14} />
-            </button>
-            <div className="assistant-message assistant-message--rich">
-              <p>Here is what I found about your notes:</p>
+              return (
+                <article className="chat-turn chat-turn--assistant" key={message.id}>
+                  {message.isError ? (
+                    <div className="assistant-message assistant-message--error">
+                      <p>{message.content}</p>
+                    </div>
+                  ) : (
+                    <ChatMarkdown content={message.content} />
+                  )}
+                  <div className="assistant-actions" aria-label="Assistant response actions">
+                    <button type="button" aria-label="Copy response" onClick={() => void handleCopy(message.content)}>
+                      <FiCopy aria-hidden="true" size={15} />
+                    </button>
+                    {isLastAssistant && !message.isError ? (
+                      <button
+                        type="button"
+                        aria-label="Regenerate response"
+                        disabled={isSending}
+                        onClick={handleRegenerate}
+                      >
+                        <FiRefreshCw aria-hidden="true" size={15} />
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
 
-              <h2>Your Existing Note</h2>
-              <p>
-                You currently have <strong>one recording titled “Note”</strong> from 2026-09-13.
-              </p>
+            {isSending ? (
+              <article className="chat-turn chat-turn--assistant" aria-live="polite">
+                <div className="ai-typing" aria-label="Buddy is thinking">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </article>
+            ) : null}
 
-              <h3>What this note is about</h3>
-              <p>
-                From the transcript, this note appears to be about an app idea connected to a company
-                called “Surecon” or something similar. The note captures early thinking about how that
-                app could help organize architecture-level services and daily operations.
-              </p>
-
-              <ul>
-                <li>
-                  It describes a company that builds <strong>architecture-level services</strong>, such
-                  as buildings, portals, and related operational systems.
-                </li>
-                <li>
-                  You are brainstorming an app to <strong>manage Surecon-related operations</strong> in
-                  one place, including notes, tasks, and follow-up work.
-                </li>
-              </ul>
-            </div>
-          </article>
-        </div>
+            <div ref={threadEndRef} />
+          </div>
+        ) : null}
       </div>
 
       <form
@@ -286,15 +575,23 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
         aria-label="Ask AI Chat"
         onSubmit={(event) => {
           event.preventDefault();
-          setDraft('');
+          void handleSend();
         }}
       >
         <div className="ai-composer__box">
-          {selectedLabels.length > 0 ? (
+          {selectedSpaces.length > 0 ? (
             <div className="ai-context-chips" aria-label="Selected context">
-              {selectedLabels.map((label) => (
-                <span key={label} className="ai-context-chip">
-                  @{label}
+              {selectedSpaces.map((space) => (
+                <span key={space.id} className="ai-context-chip">
+                  <span className="ai-context-chip__label">@{space.name}</span>
+                  <button
+                    type="button"
+                    className="ai-context-chip__remove"
+                    aria-label={`Remove ${space.name} context`}
+                    onClick={() => removeSpaceContext(space.id)}
+                  >
+                    <FiX aria-hidden="true" size={11} />
+                  </button>
                 </span>
               ))}
             </div>
@@ -325,71 +622,55 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
                     ref={contextSearchRef}
                     value={contextQuery}
                     onChange={(event) => setContextQuery(event.target.value)}
-                    placeholder="Search"
+                    placeholder="Search spaces"
                     aria-label="Search context"
                   />
                 </label>
 
                 <div className="add-context-popover__body">
-                  {filteredChannels.length > 0 ? (
-                    <section className="add-context-section">
-                      <h2>Channels</h2>
-                      {filteredChannels.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`add-context-item${selectedContextIds.includes(item.id) ? ' is-selected' : ''}`}
-                          onClick={() => toggleContextItem(item.id)}
-                        >
-                          <FiHash aria-hidden="true" size={15} />
-                          <strong>{item.title}</strong>
-                        </button>
-                      ))}
-                    </section>
+                  {isSpacesLoading ? (
+                    <div className="ai-chat-inline-state" aria-busy="true">
+                      <span className="home-spinner" />
+                      <p>Loading spaces…</p>
+                    </div>
                   ) : null}
 
-                  {filteredConversations.length > 0 ? (
-                    <section className="add-context-section">
-                      <h2>Conversations</h2>
-                      {filteredConversations.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={`add-context-item add-context-item--stack${selectedContextIds.includes(item.id) ? ' is-selected' : ''}`}
-                          onClick={() => toggleContextItem(item.id)}
-                        >
-                          <span className="add-context-item__text">
-                            <strong>{item.title}</strong>
-                            {item.subtitle ? <small>{item.subtitle}</small> : null}
-                          </span>
-                        </button>
-                      ))}
-                    </section>
+                  {isSpacesError && !isSpacesLoading ? (
+                    <div className="ai-chat-inline-state ai-chat-inline-state--error" role="alert">
+                      <FiAlertCircle aria-hidden="true" size={16} />
+                      <p>Unable to load spaces</p>
+                      <button className="home-retry-button" type="button" onClick={() => void refetchSpaces()}>
+                        <FiRefreshCw aria-hidden="true" size={14} />
+                        Retry
+                      </button>
+                    </div>
                   ) : null}
 
-                  {filteredSpaces.length > 0 ? (
+                  {!isSpacesLoading && !isSpacesError && filteredSpaces.length > 0 ? (
                     <section className="add-context-section">
                       <h2>Spaces</h2>
-                      {filteredSpaces.map((item) => (
+                      {filteredSpaces.map((space) => (
                         <button
-                          key={item.id}
+                          key={space.id}
                           type="button"
-                          className={`add-context-item${selectedContextIds.includes(item.id) ? ' is-selected' : ''}`}
-                          onClick={() => toggleContextItem(item.id)}
+                          className={`add-context-item${selectedSpaceIds.includes(space.id) ? ' is-selected' : ''}`}
+                          onClick={() => toggleSpaceContext(space.id)}
                         >
                           <FiFolder aria-hidden="true" size={15} />
-                          <strong>{item.title}</strong>
+                          <strong>{space.name}</strong>
                         </button>
                       ))}
                     </section>
                   ) : null}
 
-                  {filteredChannels.length === 0 &&
-                  filteredConversations.length === 0 &&
-                  filteredSpaces.length === 0 ? (
+                  {!isSpacesLoading && !isSpacesError && filteredSpaces.length === 0 ? (
                     <div className="add-context-empty">
                       <p>No matches</p>
-                      <span>Try another search term.</span>
+                      <span>
+                        {spaces.length === 0
+                          ? 'Create a space on Home to use it as chat context.'
+                          : 'Try another search term.'}
+                      </span>
                     </div>
                   ) : null}
                 </div>
@@ -398,15 +679,25 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
           </div>
 
           <textarea
+            ref={composerRef}
             placeholder="Ask anything about your conversations"
             rows={compact ? 2 : 2}
             value={draft}
+            disabled={isSending || isThreadLoading}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
           />
           <div className="ai-composer__footer">
-            <button type="button">Advanced</button>
-            <button className="send-button" type="submit" aria-label="Send message">
-              <FiArrowUp aria-hidden="true" size={18} />
+            <button type="button" disabled>
+              Advanced
+            </button>
+            <button
+              className={`send-button${canSend ? ' is-ready' : ''}`}
+              type="submit"
+              aria-label="Send message"
+              disabled={!canSend}
+            >
+              {isSending ? <span className="home-spinner" /> : <FiArrowUp aria-hidden="true" size={18} />}
             </button>
           </div>
         </div>

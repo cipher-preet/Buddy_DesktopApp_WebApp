@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FiArrowRight,
   FiCheckSquare,
@@ -17,12 +17,21 @@ import {
   FiX,
 } from 'react-icons/fi';
 
-import { useRaiseSupportTicketMutation, useSubmitFeedbackMutation } from '@/services/api';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { setUnauthenticated } from '@/features/auth/authSlice';
+import {
+  api,
+  useDeleteAccountMutation,
+  useLogoutMutation,
+  useRaiseSupportTicketMutation,
+  useSubmitFeedbackMutation,
+} from '@/services/api';
 
 import { PlanDetailsModal } from './PlanDetailsModal';
 
 type SettingsPageProps = {
   onNavigateHome?: () => void;
+  onSignedOut?: () => void;
 };
 
 type AccountAction = 'plan' | 'feedback' | 'support';
@@ -153,7 +162,9 @@ const accountItems: {
   },
 ];
 
-export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
+export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps) => {
+  const dispatch = useAppDispatch();
+  const authUser = useAppSelector((state) => state.auth.user);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isLogoutOpen, setIsLogoutOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -161,6 +172,7 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isPlanOpen, setIsPlanOpen] = useState(false);
   const [deleteText, setDeleteText] = useState('');
+  const [sessionError, setSessionError] = useState('');
   const [feedbackStep, setFeedbackStep] = useState<FeedbackStep>('details');
   const [isFeedbackTopicOpen, setIsFeedbackTopicOpen] = useState(false);
   const [feedbackTopicId, setFeedbackTopicId] = useState(feedbackTopics[0].id);
@@ -174,13 +186,15 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
   const [supportError, setSupportError] = useState('');
   const [ticketId, setTicketId] = useState('');
   const [profile, setProfile] = useState({
-    name: 'Preet Kumar',
-    email: 'ps1535146@gmail.com',
-    phone: '+91 98765 43210',
+    name: authUser?.name || 'Buddy User',
+    email: authUser?.email || '',
+    phone: authUser?.phone ? String(authUser.phone) : '',
   });
   const [draftProfile, setDraftProfile] = useState(profile);
   const [submitFeedback, { isLoading: isSubmittingFeedback }] = useSubmitFeedbackMutation();
   const [raiseSupportTicket, { isLoading: isRaisingTicket }] = useRaiseSupportTicketMutation();
+  const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
+  const [deleteAccount, { isLoading: isDeletingAccount }] = useDeleteAccountMutation();
 
   const selectedFeedbackTopic = useMemo(
     () => feedbackTopics.find((topic) => topic.id === feedbackTopicId) ?? feedbackTopics[0],
@@ -194,6 +208,51 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
   const canSubmitFeedback = feedbackMessage.trim().length >= 8 && !isSubmittingFeedback;
   const canSubmitTicket =
     supportSubject.trim().length >= 4 && supportMessage.trim().length >= 12 && !isRaisingTicket;
+
+  useEffect(() => {
+    setProfile({
+      name: authUser?.name || 'Buddy User',
+      email: authUser?.email || '',
+      phone: authUser?.phone ? String(authUser.phone) : '',
+    });
+  }, [authUser?.email, authUser?.name, authUser?.phone]);
+
+  const clearLocalSession = () => {
+    dispatch(setUnauthenticated());
+    dispatch(api.util.resetApiState());
+    onSignedOut?.();
+  };
+
+  const handleLogout = async () => {
+    setSessionError('');
+    try {
+      await logout().unwrap();
+    } catch {
+      // Always clear local session even if cookie logout fails.
+    } finally {
+      setIsLogoutOpen(false);
+      clearLocalSession();
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteText !== 'DELETE' || isDeletingAccount) {
+      return;
+    }
+
+    setSessionError('');
+    try {
+      await deleteAccount({ confirmation: 'DELETE' }).unwrap();
+      setIsDeleteOpen(false);
+      clearLocalSession();
+    } catch (error) {
+      const message =
+        typeof error === 'object' && error && 'data' in error
+          ? (error as { data?: { message?: string } }).data?.message
+          : undefined;
+      setSessionError(message || 'Unable to delete account right now');
+    }
+  };
 
   const openEditProfile = () => {
     setDraftProfile(profile);
@@ -686,12 +745,13 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
           <div className="settings-confirm-modal" role="dialog" aria-label="Logout">
             <h2>Logout</h2>
             <p>Are you sure you want to sign out of Buddy?</p>
+            {sessionError ? <p className="auth-error">{sessionError}</p> : null}
             <div>
-              <button type="button" onClick={() => setIsLogoutOpen(false)}>
+              <button type="button" onClick={() => setIsLogoutOpen(false)} disabled={isLoggingOut}>
                 Cancel
               </button>
-              <button type="button" onClick={() => setIsLogoutOpen(false)}>
-                Logout
+              <button type="button" onClick={handleLogout} disabled={isLoggingOut}>
+                {isLoggingOut ? 'Signing out…' : 'Logout'}
               </button>
             </div>
           </div>
@@ -717,13 +777,14 @@ export const SettingsPage = ({ onNavigateHome }: SettingsPageProps) => {
               Type DELETE to confirm
               <input value={deleteText} onChange={(event) => setDeleteText(event.target.value.toUpperCase())} />
             </label>
+            {sessionError ? <p className="auth-error">{sessionError}</p> : null}
             <button
               className="settings-danger-button"
               type="button"
-              disabled={deleteText !== 'DELETE'}
-              onClick={() => setIsDeleteOpen(false)}
+              disabled={deleteText !== 'DELETE' || isDeletingAccount}
+              onClick={handleDeleteAccount}
             >
-              Delete my account
+              {isDeletingAccount ? 'Deleting…' : 'Delete my account'}
             </button>
           </div>
         </div>

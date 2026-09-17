@@ -30,7 +30,7 @@ export type NavigationItem = {
 type AppLayoutProps = {
   children: ReactNode;
   navigationItems: NavigationItem[];
-  viewMode?: 'default' | 'chat';
+  viewMode?: 'default' | 'chat' | 'wide';
 };
 
 const panelTabs: { id: SidePanelTab; label: string }[] = [
@@ -52,6 +52,7 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
   const { startRecording, isStarting, isVisible: isRecordingVisible } = useRecording();
   const isChatView = viewMode === 'chat';
+  const hideSidePanel = viewMode === 'chat' || viewMode === 'wide';
 
   useEffect(() => {
     const drawerQuery = window.matchMedia(`(max-width: ${DRAWER_BREAKPOINT}px)`);
@@ -310,7 +311,7 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
             {children}
           </main>
 
-          {!isChatView ? (
+          {!hideSidePanel ? (
             <>
               <button
                 className="meeting-panel-backdrop"
@@ -351,7 +352,7 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
             </>
           ) : null}
 
-          {!isChatView ? (
+          {!hideSidePanel ? (
             <div
               className="collapsed-panel-rail"
               aria-hidden={!isMeetingPanelCollapsed}

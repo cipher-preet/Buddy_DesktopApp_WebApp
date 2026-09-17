@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import {
+  FiAlertCircle,
+  FiBell,
   FiChevronDown,
   FiChevronLeft,
   FiChevronRight,
+  FiMapPin,
   FiPlus,
+  FiRefreshCw,
   FiSliders,
   FiX,
 } from 'react-icons/fi';
 
-import { CustomDropdown, TextInput, TextTextarea } from '@/components/common/CustomFormControls';
-import { createSeedDayItems, createSeedEvents } from './calendarData';
+import { useAppSelector } from '@/app/hooks';
+import { useToast } from '@/app/ToastProvider';
+import { CustomDatePicker, CustomDropdown, CustomTimePicker, TextInput, TextTextarea } from '@/components/common/CustomFormControls';
+import {
+  emptyDaySummary,
+  formatDateLabel,
+  getCalendarErrorMessage,
+  minutesToApiTimeLabel,
+} from '@/features/calendar/calendarMappers';
 import type {
   CalendarDayItem,
   CalendarEvent,
@@ -18,14 +29,13 @@ import type {
   DaySummary,
   EventCategory,
   EventDraft,
-} from './calendarTypes';
+} from '@/features/calendar/calendarTypes';
 import {
   CATEGORY_META,
   DAY_ITEM_META,
   MEETING_CATEGORIES,
   addDays,
   addMonths,
-  createEventId,
   dayItemsForDate,
   eventsForDate,
   formatFullDate,
@@ -44,7 +54,11 @@ import {
   timeInputToMinutes,
   toDateKey,
   WEEKDAY_LABELS,
-} from './calendarUtils';
+} from '@/features/calendar/calendarUtils';
+import {
+  useCreateCalendarEventMutation,
+  useGetCalendarFeedQuery,
+} from '@/services/calendarApi';
 
 const VIEW_OPTIONS = [
   { id: 'month', label: 'Month' },
@@ -52,12 +66,15 @@ const VIEW_OPTIONS = [
   { id: 'day', label: 'Day' },
 ];
 
-const CATEGORY_OPTIONS = (Object.keys(CATEGORY_META) as EventCategory[]).map((id) => ({
-  id,
-  label: `${CATEGORY_META[id].icon} ${CATEGORY_META[id].label}`,
-}));
-
 const FILTER_CATEGORIES: EventCategory[] = ['meeting', 'interview'];
+
+const REMIND_BEFORE_OPTIONS = [
+  { id: '0', label: 'At start time' },
+  { id: '5', label: '5 minutes before' },
+  { id: '10', label: '10 minutes before' },
+  { id: '15', label: '15 minutes before' },
+  { id: '30', label: '30 minutes before' },
+];
 
 const DAY_START = 8 * 60;
 const DAY_END = 18 * 60;
@@ -70,11 +87,14 @@ type PopupPosition = { top: number; left: number };
 const emptyDraft = (date: string): EventDraft => ({
   title: '',
   description: '',
-  category: 'meeting',
+  location: '',
   date,
   startTime: '09:00',
   endTime: '10:00',
-  canJoin: false,
+  aiReminder: false,
+  aiCalling: false,
+  beeping: true,
+  remindBeforeMinutes: 10,
 });
 
 const AttendeeStack = ({
@@ -158,14 +178,14 @@ const EventChip = ({ event, compact = false }: { event: CalendarEvent; compact?:
 };
 
 export const CalendarPage = () => {
+  const { showToast } = useToast();
+  const userId = useAppSelector((state) => state.auth.user?.userId);
   const today = useMemo(() => {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     return date;
   }, []);
 
-  const [events, setEvents] = useState<CalendarEvent[]>(() => createSeedEvents());
-  const [dayItems] = useState<CalendarDayItem[]>(() => createSeedDayItems());
   const [cursorDate, setCursorDate] = useState(() => new Date(today));
   const [selectedDate, setSelectedDate] = useState(() => new Date(today));
   const [view, setView] = useState<CalendarView>('month');
@@ -178,12 +198,70 @@ export const CalendarPage = () => {
   const [activeCategories, setActiveCategories] = useState<EventCategory[]>(() => [...FILTER_CATEGORIES]);
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState<EventDraft>(() => emptyDraft(toDateKey(today)));
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [remindMenuOpen, setRemindMenuOpen] = useState(false);
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const [startTimeMenuOpen, setStartTimeMenuOpen] = useState(false);
+  const [endTimeMenuOpen, setEndTimeMenuOpen] = useState(false);
   const [nowTick, setNowTick] = useState(() => nowMinutes());
+
+  const closeFormMenus = () => {
+    setDateMenuOpen(false);
+    setStartTimeMenuOpen(false);
+    setEndTimeMenuOpen(false);
+    setRemindMenuOpen(false);
+  };
 
   const toolbarRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const hidePopupTimer = useRef<number | null>(null);
+
+  const monthGrid = useMemo(() => getMonthGridDates(cursorDate), [cursorDate]);
+  const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+
+  const feedRange = useMemo(() => {
+    if (view === 'week') {
+      return {
+        from: toDateKey(weekDates[0]),
+        to: toDateKey(weekDates[6]),
+      };
+    }
+
+    if (view === 'day') {
+      const week = getWeekDates(selectedDate);
+      return {
+        from: toDateKey(week[0]),
+        to: toDateKey(week[6]),
+      };
+    }
+
+    return {
+      from: toDateKey(monthGrid[0]),
+      to: toDateKey(monthGrid[monthGrid.length - 1]),
+    };
+  }, [view, weekDates, selectedDate, monthGrid]);
+
+  const {
+    data: feedData,
+    isLoading: isFeedLoading,
+    isFetching: isFeedFetching,
+    isError: isFeedError,
+    error: feedError,
+    refetch: refetchFeed,
+  } = useGetCalendarFeedQuery(
+    {
+      userId: userId || '',
+      from: feedRange.from,
+      to: feedRange.to,
+    },
+    { skip: !userId },
+  );
+
+  const [createCalendarEvent, { isLoading: isCreatingEvent }] = useCreateCalendarEventMutation();
+
+  const events = feedData?.events ?? [];
+  const dayItems = feedData?.dayItems ?? [];
+  const summaryByDate = feedData?.summaryByDate ?? {};
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick(nowMinutes()), 60_000);
@@ -218,8 +296,11 @@ export const CalendarPage = () => {
     [events, activeCategories],
   );
 
-  const monthGrid = useMemo(() => getMonthGridDates(cursorDate), [cursorDate]);
-  const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+  const resolveSummary = (date: Date): DaySummary => {
+    const key = toDateKey(date);
+    return summaryByDate[key] ?? getDaySummary(filteredEvents, dayItems, date) ?? emptyDaySummary();
+  };
+
   const activePopupDate = hoverDate ?? (popupPinned ? selectedDate : null);
   const popupEvents = useMemo(
     () => (activePopupDate ? eventsForDate(filteredEvents, activePopupDate) : []),
@@ -230,8 +311,9 @@ export const CalendarPage = () => {
     [dayItems, activePopupDate],
   );
   const popupSummary = useMemo(
-    () => (activePopupDate ? getDaySummary(filteredEvents, dayItems, activePopupDate) : null),
-    [filteredEvents, dayItems, activePopupDate],
+    () => (activePopupDate ? resolveSummary(activePopupDate) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activePopupDate, filteredEvents, dayItems, summaryByDate],
   );
   const dayViewEvents = useMemo(
     () => eventsForDate(filteredEvents, selectedDate),
@@ -242,8 +324,9 @@ export const CalendarPage = () => {
     [dayItems, selectedDate],
   );
   const dayViewSummary = useMemo(
-    () => getDaySummary(filteredEvents, dayItems, selectedDate),
-    [filteredEvents, dayItems, selectedDate],
+    () => resolveSummary(selectedDate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedDate, filteredEvents, dayItems, summaryByDate],
   );
 
   const timelineSlots = useMemo(() => {
@@ -272,6 +355,13 @@ export const CalendarPage = () => {
     const base = new Date(today.getFullYear(), today.getMonth() - 6, 1);
     return Array.from({ length: 18 }, (_, index) => addMonths(base, index));
   }, [today]);
+
+  const feedErrorMessage = !userId
+    ? 'Please sign in again to load your calendar.'
+    : isFeedError
+      ? getCalendarErrorMessage(feedError, 'Unable to load calendar')
+      : null;
+  const showInitialLoading = Boolean(userId) && isFeedLoading && !feedData;
 
   const clearHidePopupTimer = () => {
     if (hidePopupTimer.current) {
@@ -357,42 +447,55 @@ export const CalendarPage = () => {
 
   const openAddEvent = (date = selectedDate) => {
     setDraft(emptyDraft(toDateKey(date)));
-    setCategoryMenuOpen(false);
+    setFormError(null);
+    closeFormMenus();
     setAddOpen(true);
     closePopup();
   };
 
-  const handleCreateEvent = (event: FormEvent) => {
+  const handleCreateEvent = async (event: FormEvent) => {
     event.preventDefault();
     const title = draft.title.trim();
-    if (!title) return;
+    if (!title) {
+      setFormError('Title is required.');
+      return;
+    }
 
     const startMinutes = timeInputToMinutes(draft.startTime);
-    const endMinutes = Math.max(startMinutes + 15, timeInputToMinutes(draft.endTime));
-    const eventDate = parseDateKey(draft.date);
+    const endMinutes = timeInputToMinutes(draft.endTime);
+    if (Number.isNaN(startMinutes) || Number.isNaN(endMinutes) || endMinutes <= startMinutes) {
+      setFormError('End time must be after the start time.');
+      return;
+    }
 
-    const nextEvent: CalendarEvent = {
-      id: createEventId(),
-      title,
-      description: draft.description.trim() || undefined,
-      category: draft.category,
-      date: draft.date,
-      startMinutes,
-      endMinutes,
-      canJoin: draft.canJoin && draft.category === 'meeting',
-      attendees:
-        draft.category === 'meeting' || draft.category === 'interview' || draft.category === 'onboarding'
-          ? [
-              { id: 'you', name: 'You', initials: 'YO', color: '#1355ff' },
-              { id: 'buddy', name: 'Buddy AI', initials: 'BU', color: '#0f8b63' },
-            ]
-          : undefined,
-    };
+    setFormError(null);
 
-    setEvents((current) => [...current, nextEvent]);
-    setSelectedDate(eventDate);
-    setCursorDate(new Date(eventDate.getFullYear(), eventDate.getMonth(), 1));
-    setAddOpen(false);
+    try {
+      await createCalendarEvent({
+        title,
+        description: draft.description.trim(),
+        location: draft.location.trim(),
+        dateKey: draft.date,
+        dateLabel: formatDateLabel(draft.date),
+        startTimeLabel: minutesToApiTimeLabel(startMinutes),
+        endTimeLabel: minutesToApiTimeLabel(endMinutes),
+        aiReminder: draft.aiReminder,
+        aiCalling: draft.aiReminder ? draft.aiCalling : false,
+        notification: false,
+        beeping: draft.aiReminder ? draft.beeping || !draft.aiCalling : false,
+        remindBeforeMinutes: draft.aiReminder ? draft.remindBeforeMinutes : 0,
+      }).unwrap();
+
+      const eventDate = parseDateKey(draft.date);
+      setSelectedDate(eventDate);
+      setCursorDate(new Date(eventDate.getFullYear(), eventDate.getMonth(), 1));
+      setAddOpen(false);
+      showToast({ message: 'Event created', type: 'success' });
+    } catch (error) {
+      const message = getCalendarErrorMessage(error, 'Unable to create event');
+      setFormError(message);
+      showToast({ message: 'Create failed', description: message, type: 'error' });
+    }
   };
 
   const nowOffset = ((nowTick - DAY_START) / (DAY_END - DAY_START)) * 100;
@@ -400,7 +503,7 @@ export const CalendarPage = () => {
   const renderDayCell = (date: Date, options?: { showWeekday?: boolean }) => {
     const dayEvents = eventsForDate(filteredEvents, date);
     const meetingPreview = meetingsForDate(filteredEvents, date).slice(0, options?.showWeekday ? 2 : 1);
-    const summary = getDaySummary(filteredEvents, dayItems, date);
+    const summary = resolveSummary(date);
     const outside = !isSameMonth(date, cursorDate);
     const isWeekend = date.getDay() === 0 || date.getDay() === 6;
     const selected = isSameDay(date, selectedDate);
@@ -514,6 +617,7 @@ export const CalendarPage = () => {
                 </div>
               ) : null}
             </div>
+            {isFeedFetching && !showInitialLoading ? <span className="cal-sync-hint">Refreshing…</span> : null}
           </div>
 
           <div className="calendar-toolbar__right">
@@ -598,177 +702,331 @@ export const CalendarPage = () => {
         </div>
 
         <div className="calendar-stage" ref={stageRef}>
-          {view === 'month' ? (
-            <div className="cal-month">
-              <div className="cal-weekday-row">
-                {WEEKDAY_LABELS.map((label) => (
-                  <span key={label}>
-                    <span className="cal-weekday-row__full">{label}</span>
-                    <span className="cal-weekday-row__short" aria-hidden="true">
-                      {label.charAt(0)}
-                    </span>
-                  </span>
-                ))}
-              </div>
-              <div className="cal-month-grid">{monthGrid.map((date) => renderDayCell(date))}</div>
+          {showInitialLoading ? (
+            <div className="cal-state-panel" aria-busy="true">
+              <span className="home-spinner" />
+              <p>Loading calendar…</p>
             </div>
           ) : null}
 
-          {view === 'week' ? (
-            <div className="cal-week">
-              <div className="cal-week-grid">{weekDates.map((date) => renderDayCell(date, { showWeekday: true }))}</div>
-            </div>
-          ) : null}
-
-          {view === 'day' ? (
-            <div className="cal-day-view">
-              <header className="cal-day-view__header">
-                <div>
-                  <p className="page-kicker">{formatShortWeekday(selectedDate)}</p>
-                  <h2>{formatFullDate(selectedDate)}</h2>
-                </div>
-                <button type="button" className="cal-pill-btn cal-pill-btn--menu" onClick={() => openAddEvent(selectedDate)}>
-                  <FiPlus size={14} aria-hidden="true" />
-                  Add
-                </button>
-              </header>
-              <DaySummaryBadges summary={dayViewSummary} />
-              <DayActivityPanel
-                meetings={meetingsForDate(filteredEvents, selectedDate)}
-                items={dayViewItems}
-                otherEvents={dayViewEvents.filter((event) => !MEETING_CATEGORIES.includes(event.category))}
-              />
-              <DayTimeline
-                events={dayViewEvents}
-                slots={timelineSlots}
-                showNowLine={isSameDay(selectedDate, today)}
-                nowOffset={nowOffset}
-              />
-            </div>
-          ) : null}
-
-          {activePopupDate && view !== 'day' ? (
-            <aside
-              className="cal-day-popup"
-              style={{ top: popupPos.top, left: popupPos.left, width: POPUP_WIDTH }}
-              aria-label="Day details"
-              onMouseEnter={clearHidePopupTimer}
-              onMouseLeave={scheduleHidePopup}
-            >
-              <header className="cal-day-popup__header">
-                <div>
-                  <h2>{formatFullDate(activePopupDate)}</h2>
-                  {popupSummary ? <DaySummaryBadges summary={popupSummary} /> : null}
-                </div>
-                <button type="button" aria-label="Close day details" onClick={closePopup}>
-                  <FiX size={16} aria-hidden="true" />
-                </button>
-              </header>
-              <DayActivityPanel
-                meetings={meetingsForDate(filteredEvents, activePopupDate)}
-                items={popupItems}
-                otherEvents={popupEvents.filter((event) => !MEETING_CATEGORIES.includes(event.category))}
-              />
-              <button type="button" className="cal-panel-add" onClick={() => openAddEvent(activePopupDate)}>
-                <FiPlus size={14} aria-hidden="true" />
-                Add event for this day
+          {!showInitialLoading && feedErrorMessage ? (
+            <div className="cal-state-panel cal-state-panel--error" role="alert">
+              <FiAlertCircle aria-hidden="true" size={18} />
+              <p>{feedErrorMessage}</p>
+              <button type="button" className="home-retry-button" onClick={() => void refetchFeed()}>
+                <FiRefreshCw aria-hidden="true" size={14} />
+                Retry
               </button>
-            </aside>
+            </div>
+          ) : null}
+
+          {!showInitialLoading && !feedErrorMessage ? (
+            <>
+              {view === 'month' ? (
+                <div className="cal-month">
+                  <div className="cal-weekday-row">
+                    {WEEKDAY_LABELS.map((label) => (
+                      <span key={label}>
+                        <span className="cal-weekday-row__full">{label}</span>
+                        <span className="cal-weekday-row__short" aria-hidden="true">
+                          {label.charAt(0)}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="cal-month-grid">{monthGrid.map((date) => renderDayCell(date))}</div>
+                </div>
+              ) : null}
+
+              {view === 'week' ? (
+                <div className="cal-week">
+                  <div className="cal-week-grid">
+                    {weekDates.map((date) => renderDayCell(date, { showWeekday: true }))}
+                  </div>
+                </div>
+              ) : null}
+
+              {view === 'day' ? (
+                <div className="cal-day-view">
+                  <header className="cal-day-view__header">
+                    <div>
+                      <p className="page-kicker">{formatShortWeekday(selectedDate)}</p>
+                      <h2>{formatFullDate(selectedDate)}</h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="cal-pill-btn cal-pill-btn--menu"
+                      onClick={() => openAddEvent(selectedDate)}
+                    >
+                      <FiPlus size={14} aria-hidden="true" />
+                      Add
+                    </button>
+                  </header>
+                  <DaySummaryBadges summary={dayViewSummary} />
+                  <DayActivityPanel
+                    meetings={meetingsForDate(filteredEvents, selectedDate)}
+                    items={dayViewItems}
+                    otherEvents={dayViewEvents.filter(
+                      (event) => !MEETING_CATEGORIES.includes(event.category),
+                    )}
+                  />
+                  <DayTimeline
+                    events={dayViewEvents}
+                    slots={timelineSlots}
+                    showNowLine={isSameDay(selectedDate, today)}
+                    nowOffset={nowOffset}
+                  />
+                </div>
+              ) : null}
+
+              {activePopupDate && view !== 'day' ? (
+                <aside
+                  className="cal-day-popup"
+                  style={{ top: popupPos.top, left: popupPos.left, width: POPUP_WIDTH }}
+                  aria-label="Day details"
+                  onMouseEnter={clearHidePopupTimer}
+                  onMouseLeave={scheduleHidePopup}
+                >
+                  <header className="cal-day-popup__header">
+                    <div>
+                      <h2>{formatFullDate(activePopupDate)}</h2>
+                      {popupSummary ? <DaySummaryBadges summary={popupSummary} /> : null}
+                    </div>
+                    <button type="button" aria-label="Close day details" onClick={closePopup}>
+                      <FiX size={16} aria-hidden="true" />
+                    </button>
+                  </header>
+                  <DayActivityPanel
+                    meetings={meetingsForDate(filteredEvents, activePopupDate)}
+                    items={popupItems}
+                    otherEvents={popupEvents.filter(
+                      (event) => !MEETING_CATEGORIES.includes(event.category),
+                    )}
+                  />
+                  <button
+                    type="button"
+                    className="cal-panel-add"
+                    onClick={() => openAddEvent(activePopupDate)}
+                  >
+                    <FiPlus size={14} aria-hidden="true" />
+                    Add event for this day
+                  </button>
+                </aside>
+              ) : null}
+            </>
           ) : null}
         </div>
       </div>
 
       {addOpen ? (
-        <div className="settings-modal-backdrop" role="presentation" onClick={() => setAddOpen(false)}>
+        <div
+          className="cal-add-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isCreatingEvent) setAddOpen(false);
+          }}
+        >
           <form
-            className="settings-modal settings-action-modal home-create-modal cal-add-modal"
+            className="cal-add-modal"
             role="dialog"
+            aria-modal="true"
             aria-label="Add event"
             onClick={(clickEvent) => clickEvent.stopPropagation()}
-            onSubmit={handleCreateEvent}
+            onSubmit={(submitEvent) => void handleCreateEvent(submitEvent)}
           >
-            <header>
+            <header className="cal-add-modal__header">
               <div>
-                <p className="page-kicker">Calendar</p>
+                <p>New calendar event</p>
                 <h2>Add Event</h2>
               </div>
-              <button type="button" aria-label="Close" onClick={() => setAddOpen(false)}>
+              <button
+                type="button"
+                className="cal-add-modal__close"
+                aria-label="Close"
+                disabled={isCreatingEvent}
+                onClick={() => setAddOpen(false)}
+              >
                 <FiX size={18} aria-hidden="true" />
               </button>
             </header>
 
-            <TextInput
-              label="Title"
-              value={draft.title}
-              onChange={(changeEvent) => setDraft((current) => ({ ...current, title: changeEvent.target.value }))}
-              placeholder="Weekly team sync"
-              required
-            />
-
-            <TextTextarea
-              label="Description"
-              value={draft.description}
-              onChange={(changeEvent) =>
-                setDraft((current) => ({ ...current, description: changeEvent.target.value }))
-              }
-              placeholder="Optional notes"
-              rows={3}
-            />
-
-            <CustomDropdown
-              label="Category"
-              options={CATEGORY_OPTIONS}
-              value={draft.category}
-              isOpen={categoryMenuOpen}
-              onOpenChange={setCategoryMenuOpen}
-              onChange={(value) => setDraft((current) => ({ ...current, category: value as EventCategory }))}
-            />
-
-            <div className="home-create-modal__row">
-              <TextInput
-                label="Date"
-                type="date"
-                value={draft.date}
-                onChange={(changeEvent) => setDraft((current) => ({ ...current, date: changeEvent.target.value }))}
-                required
-              />
-              <label className="cal-join-toggle">
-                <input
-                  type="checkbox"
-                  checked={draft.canJoin}
+            <div className="cal-add-modal__body">
+              <section className="cal-add-section" aria-label="Event details">
+                <h3>Details</h3>
+                <TextInput
+                  label="Title"
+                  value={draft.title}
                   onChange={(changeEvent) =>
-                    setDraft((current) => ({ ...current, canJoin: changeEvent.target.checked }))
+                    setDraft((current) => ({ ...current, title: changeEvent.target.value }))
                   }
+                  placeholder="Weekly team sync"
+                  required
+                  maxLength={80}
                 />
-                <span>Show Join button</span>
-              </label>
+                <TextTextarea
+                  label="Description"
+                  value={draft.description}
+                  onChange={(changeEvent) =>
+                    setDraft((current) => ({ ...current, description: changeEvent.target.value }))
+                  }
+                  placeholder="Add agenda or notes"
+                  rows={3}
+                />
+                <TextInput
+                  label="Location"
+                  icon={<FiMapPin aria-hidden="true" size={15} />}
+                  value={draft.location}
+                  onChange={(changeEvent) =>
+                    setDraft((current) => ({ ...current, location: changeEvent.target.value }))
+                  }
+                  placeholder="Office, Zoom, or Google Meet"
+                  maxLength={120}
+                />
+              </section>
+
+              <section className="cal-add-section" aria-label="Event schedule">
+                <h3>Schedule</h3>
+                <CustomDatePicker
+                  label="Date"
+                  value={draft.date}
+                  isOpen={dateMenuOpen}
+                  onOpenChange={(open) => {
+                    setStartTimeMenuOpen(false);
+                    setEndTimeMenuOpen(false);
+                    setRemindMenuOpen(false);
+                    setDateMenuOpen(open);
+                  }}
+                  onChange={(value) => setDraft((current) => ({ ...current, date: value }))}
+                />
+                <div className="cal-add-modal__row">
+                  <CustomTimePicker
+                    label="Starts"
+                    value={draft.startTime}
+                    isOpen={startTimeMenuOpen}
+                    onOpenChange={(open) => {
+                      setDateMenuOpen(false);
+                      setEndTimeMenuOpen(false);
+                      setRemindMenuOpen(false);
+                      setStartTimeMenuOpen(open);
+                    }}
+                    onChange={(value) => setDraft((current) => ({ ...current, startTime: value }))}
+                  />
+                  <CustomTimePicker
+                    label="Ends"
+                    value={draft.endTime}
+                    isOpen={endTimeMenuOpen}
+                    onOpenChange={(open) => {
+                      setDateMenuOpen(false);
+                      setStartTimeMenuOpen(false);
+                      setRemindMenuOpen(false);
+                      setEndTimeMenuOpen(open);
+                    }}
+                    onChange={(value) => setDraft((current) => ({ ...current, endTime: value }))}
+                  />
+                </div>
+              </section>
+
+              <section className="cal-add-section cal-add-section--reminder" aria-label="Reminder">
+                <h3>Reminder</h3>
+                <div className={`cal-reminder-card${draft.aiReminder ? ' is-open' : ''}`}>
+                  <div className="cal-reminder-card__top">
+                    <span className="cal-reminder-card__icon" aria-hidden="true">
+                      <FiBell size={16} />
+                    </span>
+                    <div className="cal-reminder-card__copy">
+                      <strong>Remind me before this event</strong>
+                      <small>Send an alert before the event starts</small>
+                    </div>
+                    <button
+                      type="button"
+                      className={`cal-reminder-toggle${draft.aiReminder ? ' is-on' : ''}`}
+                      role="switch"
+                      aria-checked={draft.aiReminder}
+                      aria-label="Remind me before this event"
+                      onClick={() => {
+                        closeFormMenus();
+                        setDraft((current) => ({
+                          ...current,
+                          aiReminder: !current.aiReminder,
+                          beeping: !current.aiReminder
+                            ? current.beeping || !current.aiCalling
+                            : current.beeping,
+                        }));
+                      }}
+                    >
+                      <span />
+                    </button>
+                  </div>
+
+                  {draft.aiReminder ? (
+                    <div className="cal-reminder-card__body">
+                      <CustomDropdown
+                        label="Remind before"
+                        options={REMIND_BEFORE_OPTIONS}
+                        value={String(draft.remindBeforeMinutes)}
+                        isOpen={remindMenuOpen}
+                        onOpenChange={(open) => {
+                          setDateMenuOpen(false);
+                          setStartTimeMenuOpen(false);
+                          setEndTimeMenuOpen(false);
+                          setRemindMenuOpen(open);
+                        }}
+                        onChange={(value) =>
+                          setDraft((current) => ({
+                            ...current,
+                            remindBeforeMinutes: Number(value),
+                          }))
+                        }
+                      />
+
+                      <div className="cal-reminder-channels" role="group" aria-label="Alert type">
+                        <button
+                          type="button"
+                          className={`cal-reminder-channel${draft.beeping ? ' is-on' : ''}`}
+                          aria-pressed={draft.beeping}
+                          onClick={() => {
+                            closeFormMenus();
+                            setDraft((current) => ({ ...current, beeping: !current.beeping }));
+                          }}
+                        >
+                          Beep alert
+                        </button>
+                        <button
+                          type="button"
+                          className={`cal-reminder-channel${draft.aiCalling ? ' is-on' : ''}`}
+                          aria-pressed={draft.aiCalling}
+                          onClick={() => {
+                            closeFormMenus();
+                            setDraft((current) => ({ ...current, aiCalling: !current.aiCalling }));
+                          }}
+                        >
+                          AI call
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              {formError ? (
+                <div className="cal-form-error" role="alert">
+                  <FiAlertCircle aria-hidden="true" size={14} />
+                  <p>{formError}</p>
+                </div>
+              ) : null}
             </div>
 
-            <div className="home-create-modal__row">
-              <TextInput
-                label="Starts"
-                type="time"
-                value={draft.startTime}
-                onChange={(changeEvent) =>
-                  setDraft((current) => ({ ...current, startTime: changeEvent.target.value }))
-                }
-                required
-              />
-              <TextInput
-                label="Ends"
-                type="time"
-                value={draft.endTime}
-                onChange={(changeEvent) => setDraft((current) => ({ ...current, endTime: changeEvent.target.value }))}
-                required
-              />
-            </div>
-
-            <footer className="settings-form-footer">
-              <button type="button" className="settings-secondary-button" onClick={() => setAddOpen(false)}>
+            <footer className="cal-add-modal__footer">
+              <button
+                type="button"
+                className="cal-add-modal__cancel"
+                disabled={isCreatingEvent}
+                onClick={() => setAddOpen(false)}
+              >
                 Cancel
               </button>
-              <button type="submit" className="settings-primary-button">
-                Create event
+              <button type="submit" className="cal-add-modal__submit" disabled={isCreatingEvent}>
+                {isCreatingEvent ? 'Creating…' : 'Create event'}
               </button>
             </footer>
           </form>
@@ -791,7 +1049,11 @@ const DayActivityPanel = ({
   const notes = items.filter((item) => item.kind === 'note');
   const reminders = items.filter((item) => item.kind === 'reminder');
   const isEmpty =
-    meetings.length === 0 && tasks.length === 0 && notes.length === 0 && reminders.length === 0 && otherEvents.length === 0;
+    meetings.length === 0 &&
+    tasks.length === 0 &&
+    notes.length === 0 &&
+    reminders.length === 0 &&
+    otherEvents.length === 0;
 
   if (isEmpty) {
     return (
@@ -847,18 +1109,17 @@ const DayActivityPanel = ({
             {meetings.map((event) => {
               const meta = CATEGORY_META[event.category];
               return (
-                <article key={event.id} className={`cal-day-item cal-day-item--meeting cal-day-item--${meta.tone}`}>
+                <article
+                  key={event.id}
+                  className={`cal-day-item cal-day-item--meeting cal-day-item--${meta.tone}`}
+                >
                   <div className="cal-day-item__top">
                     <h3>{event.title}</h3>
                     <time>{formatTimeRange(event.startMinutes, event.endMinutes)}</time>
                   </div>
                   {event.description ? <p>{event.description}</p> : null}
+                  {event.spaceName ? <small>{event.spaceName}</small> : null}
                   {event.attendees?.length ? <AttendeeStack attendees={event.attendees} /> : null}
-                  {event.canJoin ? (
-                    <button type="button" className="cal-join-btn">
-                      Join
-                    </button>
-                  ) : null}
                 </article>
               );
             })}
@@ -948,12 +1209,6 @@ const DayTimeline = ({
                   {isBlock ? <small>{formatTimeRange(event.startMinutes, event.endMinutes)}</small> : null}
                 </div>
               </div>
-              {event.attendees?.length ? <AttendeeStack attendees={event.attendees} /> : null}
-              {event.canJoin ? (
-                <button type="button" className="cal-join-btn">
-                  Join
-                </button>
-              ) : null}
             </article>
           );
         })}

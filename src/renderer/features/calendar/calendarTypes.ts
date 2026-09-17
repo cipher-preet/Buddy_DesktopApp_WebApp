@@ -29,6 +29,8 @@ export type CalendarEvent = {
   endMinutes: number;
   attendees?: CalendarAttendee[];
   canJoin?: boolean;
+  source?: 'calendar_event' | 'conversation' | string;
+  spaceName?: string | null;
 };
 
 export type CalendarDayItem = {
@@ -55,9 +57,12 @@ export type DaySummary = {
 export type EventDraft = {
   title: string;
   description: string;
-  category: EventCategory;
+  location: string;
   date: string;
   startTime: string;
   endTime: string;
-  canJoin: boolean;
+  aiReminder: boolean;
+  aiCalling: boolean;
+  beeping: boolean;
+  remindBeforeMinutes: number;
 };

@@ -559,7 +559,8 @@
   transition: grid-template-columns 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.workspace-layout[data-view-mode='chat'] {
+.workspace-layout[data-view-mode='chat'],
+.workspace-layout[data-view-mode='wide'] {
   grid-template-columns: minmax(0, 1fr);
 }
 

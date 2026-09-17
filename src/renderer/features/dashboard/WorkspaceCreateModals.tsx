@@ -11,7 +11,8 @@ export type TaskPriority = 'High' | 'Medium' | 'Low';
 
 type CreateSpaceModalProps = {
   onClose: () => void;
-  onCreate: (payload: { name: string; description: string }) => void;
+  onCreate: (payload: { name: string; description: string }) => void | Promise<void>;
+  isSubmitting?: boolean;
 };
 
 type CreateTaskModalProps = {
@@ -22,13 +23,15 @@ type CreateTaskModalProps = {
     description: string;
     dueDate: string;
     priority: TaskPriority;
-  }) => void;
+  }) => void | Promise<void>;
+  isSubmitting?: boolean;
 };
 
 type CreateNoteModalProps = {
   spaceName: string;
   onClose: () => void;
-  onCreate: (payload: { title: string; description: string }) => void;
+  onCreate: (payload: { title: string; description: string }) => void | Promise<void>;
+  isSubmitting?: boolean;
 };
 
 type DuePreset = 'today' | 'tomorrow' | 'this_week' | 'next_week' | 'custom';
@@ -83,12 +86,16 @@ const dueOptions = [
   { id: 'custom', label: 'Custom date', description: 'Pick an exact due date' },
 ];
 
-export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) => {
+export const CreateSpaceModal = ({ onClose, onCreate, isSubmitting = false }: CreateSpaceModalProps) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const trimmedName = name.trim();
 
     if (!trimmedName) {
@@ -101,18 +108,27 @@ export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) =
       return;
     }
 
-    onCreate({
+    void onCreate({
       name: trimmedName,
       description: description.trim() || 'New workspace for tasks and notes.',
     });
   };
 
   return (
-    <div className="settings-modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="settings-modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!isSubmitting) {
+          onClose();
+        }
+      }}
+    >
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
         aria-label="Create space"
+        aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
@@ -120,7 +136,7 @@ export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) =
             <h2>Create New Space</h2>
             <p>Give your space a name to organize tasks and notes.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close">
+          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
             <FiX aria-hidden="true" size={18} />
           </button>
         </header>
@@ -137,6 +153,7 @@ export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) =
           maxLength={60}
           autoFocus
           hint="Use at least 3 characters"
+          disabled={isSubmitting}
         />
 
         <TextTextarea
@@ -146,16 +163,27 @@ export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) =
           placeholder="Optional short description for this space"
           maxLength={200}
           hint={`${description.trim().length}/200`}
+          disabled={isSubmitting}
         />
 
         {error ? <p className="settings-form-error">{error}</p> : null}
 
         <div className="settings-modal-actions">
-          <button className="settings-secondary-button" type="button" onClick={onClose}>
+          <button
+            className="settings-secondary-button"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
             Cancel
           </button>
-          <button className="settings-primary-button" type="button" onClick={handleSubmit}>
-            Create Space
+          <button
+            className="settings-primary-button"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Creating…' : 'Create Space'}
           </button>
         </div>
       </div>
@@ -163,7 +191,12 @@ export const CreateSpaceModal = ({ onClose, onCreate }: CreateSpaceModalProps) =
   );
 };
 
-export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModalProps) => {
+export const CreateTaskModal = ({
+  spaceName,
+  onClose,
+  onCreate,
+  isSubmitting = false,
+}: CreateTaskModalProps) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [duePreset, setDuePreset] = useState<DuePreset>('today');
@@ -179,6 +212,10 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
   );
 
   const handleSubmit = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
 
@@ -192,20 +229,29 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
       return;
     }
 
-    onCreate({
+    void onCreate({
       title: trimmedTitle,
       description: trimmedDescription,
-      dueDate: formatDisplayDate(resolvedDueDate),
+      dueDate: resolvedDueDate,
       priority,
     });
   };
 
   return (
-    <div className="settings-modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="settings-modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!isSubmitting) {
+          onClose();
+        }
+      }}
+    >
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
         aria-label="Create task"
+        aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
@@ -215,7 +261,7 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
               {spaceName} · {todayLabel()}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close">
+          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
             <FiX aria-hidden="true" size={18} />
           </button>
         </header>
@@ -232,6 +278,7 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
           maxLength={80}
           autoFocus
           hint="Title max 80 characters"
+          disabled={isSubmitting}
         />
 
         <TextTextarea
@@ -244,6 +291,7 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
           placeholder="Write a short description..."
           maxLength={500}
           hint={`${description.trim().length}/500`}
+          disabled={isSubmitting}
         />
 
         <div className="home-create-modal__row">
@@ -253,6 +301,9 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
             value={duePreset}
             isOpen={isDueOpen}
             onOpenChange={(open) => {
+              if (isSubmitting) {
+                return;
+              }
               setIsDueOpen(open);
               if (open) {
                 setIsPriorityOpen(false);
@@ -267,6 +318,9 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
             value={priority}
             isOpen={isPriorityOpen}
             onOpenChange={(open) => {
+              if (isSubmitting) {
+                return;
+              }
               setIsPriorityOpen(open);
               if (open) {
                 setIsDueOpen(false);
@@ -284,6 +338,7 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
             value={customDueDate}
             onChange={(event) => setCustomDueDate(event.target.value)}
             hint={`Selected: ${formatDisplayDate(customDueDate)}`}
+            disabled={isSubmitting}
           />
         ) : (
           <div className="custom-field-summary">
@@ -297,11 +352,21 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
         {error ? <p className="settings-form-error">{error}</p> : null}
 
         <div className="settings-modal-actions">
-          <button className="settings-secondary-button" type="button" onClick={onClose}>
+          <button
+            className="settings-secondary-button"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
             Cancel
           </button>
-          <button className="settings-primary-button" type="button" onClick={handleSubmit}>
-            Save task
+          <button
+            className="settings-primary-button"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving…' : 'Save task'}
           </button>
         </div>
       </div>
@@ -309,12 +374,21 @@ export const CreateTaskModal = ({ spaceName, onClose, onCreate }: CreateTaskModa
   );
 };
 
-export const CreateNoteModal = ({ spaceName, onClose, onCreate }: CreateNoteModalProps) => {
+export const CreateNoteModal = ({
+  spaceName,
+  onClose,
+  onCreate,
+  isSubmitting = false,
+}: CreateNoteModalProps) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
 
@@ -328,18 +402,27 @@ export const CreateNoteModal = ({ spaceName, onClose, onCreate }: CreateNoteModa
       return;
     }
 
-    onCreate({
+    void onCreate({
       title: trimmedTitle,
       description: trimmedDescription,
     });
   };
 
   return (
-    <div className="settings-modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="settings-modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!isSubmitting) {
+          onClose();
+        }
+      }}
+    >
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
         aria-label="Create note"
+        aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
@@ -349,7 +432,7 @@ export const CreateNoteModal = ({ spaceName, onClose, onCreate }: CreateNoteModa
               {spaceName} · {todayLabel()}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close">
+          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
             <FiX aria-hidden="true" size={18} />
           </button>
         </header>
@@ -366,6 +449,7 @@ export const CreateNoteModal = ({ spaceName, onClose, onCreate }: CreateNoteModa
           maxLength={80}
           autoFocus
           hint="Title max 80 characters"
+          disabled={isSubmitting}
         />
 
         <TextTextarea
@@ -378,16 +462,27 @@ export const CreateNoteModal = ({ spaceName, onClose, onCreate }: CreateNoteModa
           placeholder="Write a short description..."
           maxLength={500}
           hint={`${description.trim().length}/500`}
+          disabled={isSubmitting}
         />
 
         {error ? <p className="settings-form-error">{error}</p> : null}
 
         <div className="settings-modal-actions">
-          <button className="settings-secondary-button" type="button" onClick={onClose}>
+          <button
+            className="settings-secondary-button"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
             Cancel
           </button>
-          <button className="settings-primary-button" type="button" onClick={handleSubmit}>
-            Save note
+          <button
+            className="settings-primary-button"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving…' : 'Save note'}
           </button>
         </div>
       </div>

@@ -1,11 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  FiAlertCircle,
   FiCalendar,
   FiFileText,
   FiFolder,
   FiPlus,
+  FiRefreshCw,
   FiUser,
 } from 'react-icons/fi';
+
+import { useAppSelector } from '@/app/hooks';
+import { useToast } from '@/app/ToastProvider';
+import {
+  useCreateSpaceMutation,
+  useCreateStagedNoteMutation,
+  useCreateStagedTaskMutation,
+  useGetSpaceNotesInfiniteQuery,
+  useGetSpaceTasksInfiniteQuery,
+  useGetUserSpacesInfiniteQuery,
+} from '@/services/homeApi';
 
 import {
   CreateNoteModal,
@@ -13,565 +26,255 @@ import {
   CreateTaskModal,
 } from './WorkspaceCreateModals';
 
-type Space = {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  updatedAt: string;
-  tasks: Array<{
-    id: string;
-    title: string;
-    description: string;
-    dueDate: string;
-    owner: string;
-    priority: 'High' | 'Medium' | 'Low';
-    status: 'done' | 'open' | 'review';
-  }>;
-  notes: Array<{
-    id: string;
-    title: string;
-    excerpt: string;
-  }>;
-};
-
 type ActiveSection = 'tasks' | 'notes';
 type CreateModal = 'space' | 'task' | 'note' | null;
 
-const initialSpaces: Space[] = [
-  {
-    id: 'product',
-    name: 'Product Planning',
-    description: 'Roadmap, feature notes, and weekly product decisions.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Today',
-    tasks: [
-      {
-        id: 't1',
-        title: 'Finalize dashboard IA',
-        description:
-          'Lock the Home page structure by confirming how the spaces list behaves, how the selected folder loads its content, and how users move between the Tasks and Notes views without losing context.',
-        dueDate: 'Today',
-        owner: 'Preet Kumar',
-        priority: 'High',
-        status: 'open',
-      },
-      {
-        id: 't2',
-        title: 'Review task and note empty states',
-        description:
-          'Create clear empty states for new spaces, including helpful copy, an obvious primary action, and enough visual structure so the page still feels complete when no tasks or notes exist.',
-        dueDate: 'Design review',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'review',
-      },
-      {
-        id: 't3',
-        title: 'Confirm sidebar folder behavior',
-        description:
-          'Validate active states, keyboard focus, long folder names, spacing, and scrolling behavior so the spaces sidebar remains predictable when the user has many folders.',
-        dueDate: 'Completed',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'done',
-      },
-      {
-        id: 't9',
-        title: 'Define task detail density',
-        description:
-          'Decide which task fields should always be visible in the card view, including the description, owner, date, priority, and completion state, so the interface stays useful without becoming visually heavy.',
-        dueDate: 'Today',
-        owner: 'Preet Kumar',
-        priority: 'High',
-        status: 'open',
-      },
-      {
-        id: 't10',
-        title: 'Tune note card readability',
-        description:
-          'Review the note cards at different text lengths and make sure long descriptions remain readable, wrap naturally, and keep consistent spacing across compact and expanded workspace states.',
-        dueDate: 'Tomorrow',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'review',
-      },
-      {
-        id: 't11',
-        title: 'Prepare folder creation flow',
-        description:
-          'Outline the first version of the create-space flow, including the naming field, optional description, default task and note sections, and where the new folder should appear after creation.',
-        dueDate: 'This week',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'open',
-      },
-      {
-        id: 't12',
-        title: 'Document responsive behavior',
-        description:
-          'Write down how the spaces list, segmented switch, task cards, and notes should adapt when the meeting panel is collapsed or when the app window becomes narrow.',
-        dueDate: 'Friday',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'open',
-      },
-      {
-        id: 't13',
-        title: 'Review accessibility labels',
-        description:
-          'Check that buttons, tabs, folder selections, and task completion controls have clear accessible labels and that keyboard users can move through the workspace predictably.',
-        dueDate: 'Next sprint',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'done',
-      },
-    ],
-    notes: [
-      {
-        id: 'n1',
-        title: 'Home workspace direction',
-        excerpt:
-          'The Home workspace should behave like a focused folder system. A user selects a space on the left, then reviews the work connected to that space on the right. The right side should stay calm and task-oriented, with a simple switch between operational tasks and written notes.',
-      },
-      {
-        id: 'n2',
-        title: 'Navigation cleanup',
-        excerpt:
-          'The global shell should stay visually quiet while the Home page carries the working context. Navigation, spacing, and content density should help the user scan quickly without making the dashboard feel empty or oversized.',
-      },
-      {
-        id: 'n7',
-        title: 'Task card information design',
-        excerpt:
-          'Task cards should be descriptive enough that a user understands the work without opening a separate detail view. The title should describe the outcome, the paragraph should explain the reason and scope, and the compact metadata row should only support quick scanning.',
-      },
-      {
-        id: 'n8',
-        title: 'Spaces sidebar behavior',
-        excerpt:
-          'The spaces sidebar should feel like a folder list rather than a settings menu. It needs clear selected states, predictable ordering, and enough room for longer names while keeping the main task and note content visually dominant.',
-      },
-      {
-        id: 'n9',
-        title: 'Professional density target',
-        excerpt:
-          'The target density is closer to a productivity dashboard than a marketing page. Cards can contain meaningful content, but headings, chips, controls, and spacing should stay compact enough for repeated daily use.',
-      },
-      {
-        id: 'n10',
-        title: 'Notes section expectation',
-        excerpt:
-          'Notes should read like useful written context, not metadata logs. Each note needs a clear heading and a descriptive paragraph that captures the decision, idea, or summary the user may want to revisit later.',
-      },
-      {
-        id: 'n11',
-        title: 'Scroll behavior review',
-        excerpt:
-          'Long workspaces should scroll smoothly without breaking the app shell. The user should be able to keep the main navigation and top search available while reviewing larger task and note collections inside the Home page.',
-      },
-    ],
-  },
-  {
-    id: 'meetings',
-    name: 'Meeting Notes',
-    description: 'Transcripts, summaries, and follow-up items from calls.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Yesterday',
-    tasks: [
-      {
-        id: 't4',
-        title: 'Send recap to stakeholders',
-        description:
-          'Prepare a concise recap with meeting decisions, open blockers, assigned owners, and the next set of follow-up actions so every stakeholder can quickly understand what changed.',
-        dueDate: 'Tomorrow',
-        owner: 'Preet Kumar',
-        priority: 'High',
-        status: 'open',
-      },
-      {
-        id: 't5',
-        title: 'Tag action items from kickoff',
-        description:
-          'Review the kickoff transcript, identify commitments and unresolved questions, then convert each meaningful follow-up into a task with an owner and expected completion date.',
-        dueDate: 'In review',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'review',
-      },
-    ],
-    notes: [
-      {
-        id: 'n3',
-        title: 'New Account Kickoff',
-        excerpt:
-          'The kickoff focused on customer goals, onboarding expectations, and the biggest risks for the first implementation phase. The team agreed to prioritize fast setup, clear ownership, and weekly check-ins until the account reaches a stable workflow.',
-      },
-      {
-        id: 'n4',
-        title: 'Team Wins',
-        excerpt:
-          'The team reviewed progress across active projects, called out completed design updates, and identified areas where coordination improved. The main takeaway was to keep decisions documented close to the related work so follow-up stays easy.',
-      },
-    ],
-  },
-  {
-    id: 'research',
-    name: 'Research',
-    description: 'Ideas, references, competitive notes, and experiments.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 10',
-    tasks: [
-      {
-        id: 't6',
-        title: 'Collect AI assistant examples',
-        description:
-          'Collect examples of strong productivity assistant layouts, with attention to sidebar hierarchy, content switching, dense card design, and how apps balance notes, tasks, and meetings in one workspace.',
-        dueDate: 'Backlog',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'open',
-      },
-      {
-        id: 't7',
-        title: 'Summarize UX patterns',
-        description:
-          'Summarize repeated UI patterns from the research set, including how selected states, segmented controls, card metadata, and empty states are handled across mature productivity tools.',
-        dueDate: 'Completed',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'done',
-      },
-    ],
-    notes: [
-      {
-        id: 'n5',
-        title: 'Assistant dashboard patterns',
-        excerpt:
-          'Strong assistant dashboards usually combine a stable global shell with page-level navigation. The most usable examples keep controls compact, separate folders from content, and use dense but readable cards for activities that need quick review.',
-      },
-    ],
-  },
-  {
-    id: 'personal',
-    name: 'Personal',
-    description: 'Private reminders, learning notes, and personal planning.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 8',
-    tasks: [
-      {
-        id: 't8',
-        title: 'Create weekly planning template',
-        description:
-          'Prepare a weekly planning structure that captures priorities, review notes, reminders, and unfinished work. The template should be reusable enough for personal planning without feeling heavy.',
-        dueDate: 'Next week',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'open',
-      },
-    ],
-    notes: [
-      {
-        id: 'n6',
-        title: 'Learning queue',
-        excerpt:
-          'This queue collects topics to revisit while improving the desktop assistant, including better local data organization, smoother page transitions, more useful task metadata, and cleaner note-writing patterns.',
-      },
-    ],
-  },
-  {
-    id: 'engineering',
-    name: 'Engineering',
-    description: 'Implementation tasks, architecture notes, and technical follow-ups.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 7',
-    tasks: [
-      {
-        id: 't14',
-        title: 'Create API service conventions',
-        description:
-          'Define how RTK Query endpoints should be grouped, named, tagged, and exported so future API work follows one predictable pattern across the desktop app.',
-        dueDate: 'This week',
-        owner: 'Preet Kumar',
-        priority: 'High',
-        status: 'open',
-      },
-      {
-        id: 't15',
-        title: 'Plan local storage strategy',
-        description:
-          'Decide which user preferences should live in Electron storage, which should come from the backend, and how to avoid mixing local UI state with synchronized workspace data.',
-        dueDate: 'Next week',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'review',
-      },
-    ],
-    notes: [
-      {
-        id: 'n12',
-        title: 'Renderer architecture',
-        excerpt:
-          'The renderer should keep feature modules isolated, use shared components for repeated interface patterns, and keep API communication centralized through the RTK Query service layer.',
-      },
-      {
-        id: 'n13',
-        title: 'Electron process boundary',
-        excerpt:
-          'The preload bridge should expose only safe, intentional APIs to the renderer. Any future filesystem, settings, or native integrations should pass through small typed methods rather than direct Node access.',
-      },
-    ],
-  },
-  {
-    id: 'design-system',
-    name: 'Design System',
-    description: 'Tokens, components, interaction states, and shared UI rules.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 6',
-    tasks: [
-      {
-        id: 't16',
-        title: 'Audit shared CSS variables',
-        description:
-          'Review colors, spacing, font sizes, shadows, and layout variables to remove duplicates and make sure every new screen can reuse the same visual foundation.',
-        dueDate: 'Sep 15',
-        owner: 'Preet Kumar',
-        priority: 'Medium',
-        status: 'open',
-      },
-    ],
-    notes: [
-      {
-        id: 'n14',
-        title: 'Component consistency',
-        excerpt:
-          'Buttons, panels, segmented controls, chips, and cards should share the same radius, border color, and type scale so each feature feels like part of one desktop product.',
-      },
-    ],
-  },
-  {
-    id: 'customer-success',
-    name: 'Customer Success',
-    description: 'Customer conversations, onboarding plans, and account follow-ups.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 5',
-    tasks: [
-      {
-        id: 't17',
-        title: 'Draft onboarding checklist',
-        description:
-          'Create a reusable checklist for new customers that covers setup steps, success criteria, first-week follow-ups, and owners for every important handoff.',
-        dueDate: 'Sep 18',
-        owner: 'Preet Kumar',
-        priority: 'High',
-        status: 'open',
-      },
-    ],
-    notes: [
-      {
-        id: 'n15',
-        title: 'Onboarding risks',
-        excerpt:
-          'The most common onboarding risks are unclear ownership, missing context after kickoff calls, and not converting meeting decisions into visible follow-up tasks quickly enough.',
-      },
-    ],
-  },
-  {
-    id: 'marketing',
-    name: 'Marketing',
-    description: 'Launch ideas, positioning notes, and campaign planning.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 3',
-    tasks: [
-      {
-        id: 't18',
-        title: 'Collect launch messaging ideas',
-        description:
-          'Gather short positioning statements that explain the desktop assistant as a practical workspace for tasks, notes, meetings, and personal knowledge.',
-        dueDate: 'Backlog',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'open',
-      },
-    ],
-    notes: [
-      {
-        id: 'n16',
-        title: 'Positioning angle',
-        excerpt:
-          'The strongest positioning is not just an AI chat surface. It is a persistent desktop workspace that keeps folders, tasks, notes, and meeting context organized in one place.',
-      },
-    ],
-  },
-  {
-    id: 'finance',
-    name: 'Finance',
-    description: 'Budget notes, subscription tracking, and planning references.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Sep 1',
-    tasks: [
-      {
-        id: 't19',
-        title: 'Track recurring tools',
-        description:
-          'Create a small list of active subscriptions, renewal dates, owners, and usage notes so budget decisions can be reviewed without searching through separate documents.',
-        dueDate: 'Monthly',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'review',
-      },
-    ],
-    notes: [
-      {
-        id: 'n17',
-        title: 'Budget workspace idea',
-        excerpt:
-          'Finance notes should prioritize quick review and recurring reminders. The space can eventually combine lightweight tasks with short notes for decisions and renewal context.',
-      },
-    ],
-  },
-  {
-    id: 'archive',
-    name: 'Archive',
-    description: 'Older notes and completed planning references.',
-    owner: 'Preet Kumar',
-    updatedAt: 'Aug 28',
-    tasks: [
-      {
-        id: 't20',
-        title: 'Clean old planning notes',
-        description:
-          'Review older planning notes, keep anything still useful, and move stale decisions out of active spaces so the main workspace remains focused.',
-        dueDate: 'Someday',
-        owner: 'Preet Kumar',
-        priority: 'Low',
-        status: 'open',
-      },
-    ],
-    notes: [
-      {
-        id: 'n18',
-        title: 'Archive purpose',
-        excerpt:
-          'The archive should keep historical context available without letting older work crowd the active spaces. It is useful for reference, but should not compete with current task lists.',
-      },
-    ],
-  },
-];
+const SPACES_PAGE_SIZE = 10;
+const ITEMS_PAGE_SIZE = 10;
 
 const statusLabel = {
   done: 'Done',
   open: 'Open',
   review: 'Review',
-} satisfies Record<Space['tasks'][number]['status'], string>;
+} as const;
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error === 'object' && error && 'data' in error) {
+    const data = (error as { data?: { message?: string } }).data;
+    if (data?.message) {
+      return data.message;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+};
 
 export const DashboardPage = () => {
-  const [spaces, setSpaces] = useState<Space[]>(initialSpaces);
-  const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaces[0].id);
+  const { showToast } = useToast();
+  const userId = useAppSelector((state) => state.auth.user?.userId);
+  const userName = useAppSelector((state) => state.auth.user?.name) || 'You';
+
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<ActiveSection>('tasks');
   const [createModal, setCreateModal] = useState<CreateModal>(null);
-  const [completedTaskIds, setCompletedTaskIds] = useState(
-    () =>
-      new Set(
-        initialSpaces.flatMap((space) =>
-          space.tasks.filter((task) => task.status === 'done').map((task) => task.id),
-        ),
-      ),
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(() => new Set());
+  const [isCreating, setIsCreating] = useState(false);
+
+  const {
+    data: spacesData,
+    isLoading: isSpacesLoading,
+    isFetching: isSpacesFetching,
+    isError: isSpacesError,
+    error: spacesError,
+    refetch: refetchSpaces,
+    fetchNextPage: fetchNextSpacesPage,
+    hasNextPage: hasMoreSpaces,
+    isFetchingNextPage: isFetchingMoreSpaces,
+  } = useGetUserSpacesInfiniteQuery(
+    { userId: userId || '', limit: SPACES_PAGE_SIZE },
+    { skip: !userId },
   );
 
+  const spaces = useMemo(
+    () => spacesData?.pages.flatMap((page) => page.spaces) ?? [],
+    [spacesData],
+  );
+
+  useEffect(() => {
+    if (!spaces.length) {
+      return;
+    }
+
+    setSelectedSpaceId((current) => {
+      if (current && spaces.some((space) => space.id === current)) {
+        return current;
+      }
+
+      return spaces[0].id;
+    });
+  }, [spaces]);
+
   const selectedSpace = useMemo(
-    () => spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0],
+    () => spaces.find((space) => space.id === selectedSpaceId) ?? null,
     [selectedSpaceId, spaces],
   );
+
+  const shouldLoadTasks = Boolean(userId && selectedSpace?.id && activeSection === 'tasks');
+  const shouldLoadNotes = Boolean(userId && selectedSpace?.id && activeSection === 'notes');
+
+  const {
+    data: tasksData,
+    isLoading: isTasksLoading,
+    isFetching: isTasksFetching,
+    isError: isTasksError,
+    error: tasksError,
+    refetch: refetchTasks,
+    fetchNextPage: fetchNextTasksPage,
+    hasNextPage: hasMoreTasks,
+    isFetchingNextPage: isFetchingMoreTasks,
+  } = useGetSpaceTasksInfiniteQuery(
+    {
+      userId: userId || '',
+      spaceId: selectedSpace?.id || '',
+      limit: ITEMS_PAGE_SIZE,
+    },
+    { skip: !shouldLoadTasks },
+  );
+
+  const {
+    data: notesData,
+    isLoading: isNotesLoading,
+    isFetching: isNotesFetching,
+    isError: isNotesError,
+    error: notesError,
+    refetch: refetchNotes,
+    fetchNextPage: fetchNextNotesPage,
+    hasNextPage: hasMoreNotes,
+    isFetchingNextPage: isFetchingMoreNotes,
+  } = useGetSpaceNotesInfiniteQuery(
+    {
+      userId: userId || '',
+      spaceId: selectedSpace?.id || '',
+      limit: ITEMS_PAGE_SIZE,
+    },
+    { skip: !shouldLoadNotes },
+  );
+
+  const tasks = useMemo(() => tasksData?.pages.flatMap((page) => page.tasks) ?? [], [tasksData]);
+  const notes = useMemo(() => notesData?.pages.flatMap((page) => page.notes) ?? [], [notesData]);
+
+  useEffect(() => {
+    setCompletedTaskIds((current) => {
+      const next = new Set(current);
+      for (const task of tasks) {
+        if (task.status === 'done') {
+          next.add(task.id);
+        }
+      }
+      return next;
+    });
+  }, [tasks]);
+
+  const [createSpace] = useCreateSpaceMutation();
+  const [createTask] = useCreateStagedTaskMutation();
+  const [createNote] = useCreateStagedNoteMutation();
 
   const toggleTaskCompletion = (taskId: string) => {
     setCompletedTaskIds((currentTaskIds) => {
       const nextTaskIds = new Set(currentTaskIds);
-
       if (nextTaskIds.has(taskId)) {
         nextTaskIds.delete(taskId);
-        return nextTaskIds;
+      } else {
+        nextTaskIds.add(taskId);
       }
-
-      nextTaskIds.add(taskId);
       return nextTaskIds;
     });
   };
 
-  const createSpace = (payload: { name: string; description: string }) => {
-    const id = `space-${Date.now()}`;
-    const nextSpace: Space = {
-      id,
-      name: payload.name,
-      description: payload.description,
-      owner: 'Preet Kumar',
-      updatedAt: 'Just now',
-      tasks: [],
-      notes: [],
-    };
+  const handleCreateSpace = async (payload: { name: string; description: string }) => {
+    if (!userId || isCreating) {
+      return;
+    }
 
-    setSpaces((current) => [nextSpace, ...current]);
-    setSelectedSpaceId(id);
-    setActiveSection('tasks');
-    setCreateModal(null);
+    setIsCreating(true);
+    try {
+      const result = await createSpace({
+        userId,
+        spacename: payload.name.trim(),
+        description: payload.description.trim(),
+      }).unwrap();
+
+      setSelectedSpaceId(null);
+      setCreateModal(null);
+      setActiveSection('tasks');
+      showToast({
+        message: result.message || 'Space created successfully',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to create space'),
+        type: 'error',
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
-  const createTask = (payload: {
+  const handleCreateTask = async (payload: {
     title: string;
     description: string;
     dueDate: string;
     priority: 'High' | 'Medium' | 'Low';
   }) => {
-    const taskId = `task-${Date.now()}`;
+    if (!selectedSpace || isCreating) {
+      return;
+    }
 
-    setSpaces((current) =>
-      current.map((space) =>
-        space.id === selectedSpace.id
-          ? {
-              ...space,
-              updatedAt: 'Just now',
-              tasks: [
-                {
-                  id: taskId,
-                  title: payload.title,
-                  description: payload.description,
-                  dueDate: payload.dueDate,
-                  owner: 'Preet Kumar',
-                  priority: payload.priority,
-                  status: 'open',
-                },
-                ...space.tasks,
-              ],
-            }
-          : space,
-      ),
-    );
-    setActiveSection('tasks');
-    setCreateModal(null);
+    setIsCreating(true);
+    try {
+      const result = await createTask({
+        spaceId: selectedSpace.id,
+        title: payload.title.trim(),
+        description: payload.description.trim(),
+        date: payload.dueDate || undefined,
+      }).unwrap();
+
+      setActiveSection('tasks');
+      setCreateModal(null);
+      showToast({
+        message: result.message || 'Task saved.',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to save task.'),
+        type: 'error',
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
-  const createNote = (payload: { title: string; description: string }) => {
-    setSpaces((current) =>
-      current.map((space) =>
-        space.id === selectedSpace.id
-          ? {
-              ...space,
-              updatedAt: 'Just now',
-              notes: [
-                {
-                  id: `note-${Date.now()}`,
-                  title: payload.title,
-                  excerpt: payload.description,
-                },
-                ...space.notes,
-              ],
-            }
-          : space,
-      ),
-    );
-    setActiveSection('notes');
-    setCreateModal(null);
+  const handleCreateNote = async (payload: { title: string; description: string }) => {
+    if (!selectedSpace || isCreating) {
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const result = await createNote({
+        spaceId: selectedSpace.id,
+        title: payload.title.trim(),
+        description: payload.description.trim(),
+      }).unwrap();
+
+      setActiveSection('notes');
+      setCreateModal(null);
+      showToast({
+        message: result.message || 'Note saved.',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to save note.'),
+        type: 'error',
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
+
+  const spacesErrorMessage = getErrorMessage(spacesError, 'Unable to load spaces');
+  const tasksErrorMessage = getErrorMessage(tasksError, 'Unable to load tasks');
+  const notesErrorMessage = getErrorMessage(notesError, 'Unable to load notes');
+
+  const showTasksInitialLoading = shouldLoadTasks && isTasksLoading && tasks.length === 0;
+  const showNotesInitialLoading = shouldLoadNotes && isNotesLoading && notes.length === 0;
 
   return (
     <section className="home-workspace" aria-label="Home workspace">
@@ -587,10 +290,42 @@ export const DashboardPage = () => {
         </div>
 
         <div className="spaces-list">
+          {!userId ? (
+            <div className="home-inline-state" role="alert">
+              <FiAlertCircle aria-hidden="true" size={16} />
+              <p>Sign in again to load your spaces.</p>
+            </div>
+          ) : null}
+
+          {userId && isSpacesLoading && spaces.length === 0 ? (
+            <div className="home-inline-state" aria-busy="true">
+              <span className="home-spinner" />
+              <p>Loading spaces…</p>
+            </div>
+          ) : null}
+
+          {userId && isSpacesError && spaces.length === 0 ? (
+            <div className="home-inline-state home-inline-state--error" role="alert">
+              <FiAlertCircle aria-hidden="true" size={16} />
+              <p>{spacesErrorMessage}</p>
+              <button type="button" className="home-retry-button" onClick={() => void refetchSpaces()}>
+                <FiRefreshCw aria-hidden="true" size={14} />
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          {userId && !isSpacesLoading && !isSpacesError && spaces.length === 0 ? (
+            <div className="home-inline-state">
+              <FiFolder aria-hidden="true" size={16} />
+              <p>No spaces yet. Create one to get started.</p>
+            </div>
+          ) : null}
+
           {spaces.map((space) => (
             <button
               className="space-item"
-              data-active={space.id === selectedSpace.id ? 'true' : undefined}
+              data-active={space.id === selectedSpace?.id ? 'true' : undefined}
               key={space.id}
               type="button"
               onClick={() => setSelectedSpaceId(space.id)}
@@ -600,152 +335,279 @@ export const DashboardPage = () => {
               </span>
               <span className="space-item__content">
                 <strong>{space.name}</strong>
-                <small>{space.updatedAt}</small>
+                <small>
+                  {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} · {space.updatedAtLabel}
+                </small>
               </span>
             </button>
           ))}
+
+          {hasMoreSpaces ? (
+            <button
+              className="home-load-more"
+              type="button"
+              disabled={isFetchingMoreSpaces}
+              onClick={() => void fetchNextSpacesPage()}
+            >
+              {isFetchingMoreSpaces ? 'Loading…' : 'Load more spaces'}
+            </button>
+          ) : null}
+
+          {isSpacesFetching && !isSpacesLoading && !isFetchingMoreSpaces ? (
+            <p className="home-sync-hint">Refreshing…</p>
+          ) : null}
         </div>
       </aside>
 
       <div className="space-detail">
-        <div className="space-detail__toolbar">
-          <div className="space-switch" role="tablist" aria-label="Space content">
-            <button
-              className="space-switch__button"
-              data-active={activeSection === 'tasks' ? 'true' : undefined}
-              type="button"
-              role="tab"
-              aria-selected={activeSection === 'tasks'}
-              onClick={() => setActiveSection('tasks')}
-            >
-              Tasks
-            </button>
-            <button
-              className="space-switch__button"
-              data-active={activeSection === 'notes' ? 'true' : undefined}
-              type="button"
-              role="tab"
-              aria-selected={activeSection === 'notes'}
-              onClick={() => setActiveSection('notes')}
-            >
-              Notes
-            </button>
+        {!selectedSpace ? (
+          <div className="home-empty-state home-empty-state--panel">
+            <span className="home-empty-state__icon">
+              <FiFolder aria-hidden="true" size={20} />
+            </span>
+            <h3>Select a space</h3>
+            <p>Choose a space from the left to view its tasks and notes.</p>
           </div>
+        ) : (
+          <>
+            <div className="space-detail__toolbar">
+              <div className="space-switch" role="tablist" aria-label="Space content">
+                <button
+                  className="space-switch__button"
+                  data-active={activeSection === 'tasks' ? 'true' : undefined}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSection === 'tasks'}
+                  onClick={() => setActiveSection('tasks')}
+                >
+                  Tasks
+                </button>
+                <button
+                  className="space-switch__button"
+                  data-active={activeSection === 'notes' ? 'true' : undefined}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSection === 'notes'}
+                  onClick={() => setActiveSection('notes')}
+                >
+                  Notes
+                </button>
+              </div>
 
-          {activeSection === 'tasks' ? (
-            <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
-              <FiPlus aria-hidden="true" size={15} />
-              New task
-            </button>
-          ) : (
-            <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
-              <FiPlus aria-hidden="true" size={15} />
-              New note
-            </button>
-          )}
-        </div>
-
-        <div className="space-sections">
-          {activeSection === 'tasks' ? (
-            <section className="workspace-card" aria-label="Tasks">
-              {selectedSpace.tasks.length === 0 ? (
-                <div className="home-empty-state">
-                  <span className="home-empty-state__icon">
-                    <FiCalendar aria-hidden="true" size={20} />
-                  </span>
-                  <h3>No tasks yet</h3>
-                  <p>Create a task manually to track work inside {selectedSpace.name}.</p>
-                  <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
-                    <FiPlus aria-hidden="true" size={15} />
-                    New task
-                  </button>
-                </div>
+              {activeSection === 'tasks' ? (
+                <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
+                  <FiPlus aria-hidden="true" size={15} />
+                  New task
+                </button>
               ) : (
-                <div className="task-stack">
-                  {selectedSpace.tasks.map((task) => {
-                    const isDone = completedTaskIds.has(task.id);
-
-                    return (
-                      <article className="task-card" data-status={isDone ? 'done' : task.status} key={task.id}>
-                        <label className="task-card__toggle" aria-label={`Mark ${task.title} done`}>
-                          <input
-                            type="checkbox"
-                            checked={isDone}
-                            onChange={() => toggleTaskCompletion(task.id)}
-                          />
-                          <span />
-                        </label>
-                        <div className="task-card__content">
-                          <h3>{task.title}</h3>
-                          <p>{task.description}</p>
-                          <div className="task-card__meta">
-                            <span>
-                              <FiCalendar aria-hidden="true" size={13} />
-                              {task.dueDate}
-                            </span>
-                            <span>
-                              <FiUser aria-hidden="true" size={13} />
-                              {task.owner}
-                            </span>
-                            <span data-priority={task.priority}>{task.priority}</span>
-                          </div>
-                        </div>
-                        <span className="task-card__status">{isDone ? 'Done' : statusLabel[task.status]}</span>
-                      </article>
-                    );
-                  })}
-                </div>
+                <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
+                  <FiPlus aria-hidden="true" size={15} />
+                  New note
+                </button>
               )}
-            </section>
-          ) : (
-            <section className="workspace-card" aria-label="Notes">
-              {selectedSpace.notes.length === 0 ? (
-                <div className="home-empty-state">
-                  <span className="home-empty-state__icon">
-                    <FiFileText aria-hidden="true" size={20} />
-                  </span>
-                  <h3>No notes yet</h3>
-                  <p>Capture ideas and decisions for {selectedSpace.name} with a manual note.</p>
-                  <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
-                    <FiPlus aria-hidden="true" size={15} />
-                    New note
-                  </button>
-                </div>
-              ) : (
-                <div className="notes-stack">
-                  {selectedSpace.notes.map((note) => (
-                    <article className="space-note" key={note.id}>
-                      <span className="space-note__icon">
-                        <FiFileText aria-hidden="true" size={16} />
+            </div>
+
+            <div className="space-sections">
+              {activeSection === 'tasks' ? (
+                <section className="workspace-card" aria-label="Tasks">
+                  {showTasksInitialLoading ? (
+                    <div className="home-inline-state" aria-busy="true">
+                      <span className="home-spinner" />
+                      <p>Loading tasks…</p>
+                    </div>
+                  ) : null}
+
+                  {isTasksError && tasks.length === 0 ? (
+                    <div className="home-inline-state home-inline-state--error" role="alert">
+                      <FiAlertCircle aria-hidden="true" size={16} />
+                      <p>{tasksErrorMessage}</p>
+                      <button type="button" className="home-retry-button" onClick={() => void refetchTasks()}>
+                        <FiRefreshCw aria-hidden="true" size={14} />
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {!showTasksInitialLoading && !isTasksError && tasks.length === 0 ? (
+                    <div className="home-empty-state">
+                      <span className="home-empty-state__icon">
+                        <FiCalendar aria-hidden="true" size={20} />
                       </span>
-                      <div>
-                        <h3>{note.title}</h3>
-                        <p>{note.excerpt}</p>
+                      <h3>No tasks yet</h3>
+                      <p>Create a task manually to track work inside {selectedSpace.name}.</p>
+                      <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
+                        <FiPlus aria-hidden="true" size={15} />
+                        New task
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {tasks.length > 0 ? (
+                    <>
+                      <div className="task-stack">
+                        {tasks.map((task) => {
+                          const isDone = completedTaskIds.has(task.id) || task.status === 'done';
+
+                          return (
+                            <article
+                              className="task-card"
+                              data-status={isDone ? 'done' : task.status}
+                              key={task.id}
+                            >
+                              <label className="task-card__toggle" aria-label={`Mark ${task.title} done`}>
+                                <input
+                                  type="checkbox"
+                                  checked={isDone}
+                                  onChange={() => toggleTaskCompletion(task.id)}
+                                />
+                                <span />
+                              </label>
+                              <div className="task-card__content">
+                                <h3>{task.title}</h3>
+                                {task.description ? <p>{task.description}</p> : null}
+                                <div className="task-card__meta">
+                                  <span>
+                                    <FiCalendar aria-hidden="true" size={13} />
+                                    {task.dueDate}
+                                  </span>
+                                  <span>
+                                    <FiUser aria-hidden="true" size={13} />
+                                    {userName}
+                                  </span>
+                                  <span data-priority={task.priority}>{task.priority}</span>
+                                </div>
+                              </div>
+                              <span className="task-card__status">
+                                {isDone ? 'Done' : statusLabel[task.status]}
+                              </span>
+                            </article>
+                          );
+                        })}
                       </div>
-                    </article>
-                  ))}
-                </div>
+
+                      {hasMoreTasks ? (
+                        <button
+                          className="home-load-more home-load-more--panel"
+                          type="button"
+                          disabled={isFetchingMoreTasks}
+                          onClick={() => void fetchNextTasksPage()}
+                        >
+                          {isFetchingMoreTasks ? 'Loading…' : 'Load more tasks'}
+                        </button>
+                      ) : null}
+
+                      {isTasksFetching && !isTasksLoading && !isFetchingMoreTasks ? (
+                        <p className="home-sync-hint">Refreshing tasks…</p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </section>
+              ) : (
+                <section className="workspace-card" aria-label="Notes">
+                  {showNotesInitialLoading ? (
+                    <div className="home-inline-state" aria-busy="true">
+                      <span className="home-spinner" />
+                      <p>Loading notes…</p>
+                    </div>
+                  ) : null}
+
+                  {isNotesError && notes.length === 0 ? (
+                    <div className="home-inline-state home-inline-state--error" role="alert">
+                      <FiAlertCircle aria-hidden="true" size={16} />
+                      <p>{notesErrorMessage}</p>
+                      <button type="button" className="home-retry-button" onClick={() => void refetchNotes()}>
+                        <FiRefreshCw aria-hidden="true" size={14} />
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {!showNotesInitialLoading && !isNotesError && notes.length === 0 ? (
+                    <div className="home-empty-state">
+                      <span className="home-empty-state__icon">
+                        <FiFileText aria-hidden="true" size={20} />
+                      </span>
+                      <h3>No notes yet</h3>
+                      <p>Capture ideas and decisions for {selectedSpace.name} with a manual note.</p>
+                      <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
+                        <FiPlus aria-hidden="true" size={15} />
+                        New note
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {notes.length > 0 ? (
+                    <>
+                      <div className="notes-stack">
+                        {notes.map((note) => (
+                          <article className="space-note" key={note.id}>
+                            <span className="space-note__icon">
+                              <FiFileText aria-hidden="true" size={16} />
+                            </span>
+                            <div>
+                              <h3>{note.title}</h3>
+                              {note.excerpt ? <p>{note.excerpt}</p> : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+
+                      {hasMoreNotes ? (
+                        <button
+                          className="home-load-more home-load-more--panel"
+                          type="button"
+                          disabled={isFetchingMoreNotes}
+                          onClick={() => void fetchNextNotesPage()}
+                        >
+                          {isFetchingMoreNotes ? 'Loading…' : 'Load more notes'}
+                        </button>
+                      ) : null}
+
+                      {isNotesFetching && !isNotesLoading && !isFetchingMoreNotes ? (
+                        <p className="home-sync-hint">Refreshing notes…</p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </section>
               )}
-            </section>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
       {createModal === 'space' ? (
-        <CreateSpaceModal onClose={() => setCreateModal(null)} onCreate={createSpace} />
-      ) : null}
-      {createModal === 'task' ? (
-        <CreateTaskModal
-          spaceName={selectedSpace.name}
-          onClose={() => setCreateModal(null)}
-          onCreate={createTask}
+        <CreateSpaceModal
+          isSubmitting={isCreating}
+          onClose={() => {
+            if (!isCreating) {
+              setCreateModal(null);
+            }
+          }}
+          onCreate={handleCreateSpace}
         />
       ) : null}
-      {createModal === 'note' ? (
+      {createModal === 'task' && selectedSpace ? (
+        <CreateTaskModal
+          spaceName={selectedSpace.name}
+          isSubmitting={isCreating}
+          onClose={() => {
+            if (!isCreating) {
+              setCreateModal(null);
+            }
+          }}
+          onCreate={handleCreateTask}
+        />
+      ) : null}
+      {createModal === 'note' && selectedSpace ? (
         <CreateNoteModal
           spaceName={selectedSpace.name}
-          onClose={() => setCreateModal(null)}
-          onCreate={createNote}
+          isSubmitting={isCreating}
+          onClose={() => {
+            if (!isCreating) {
+              setCreateModal(null);
+            }
+          }}
+          onCreate={handleCreateNote}
         />
       ) : null}
     </section>
