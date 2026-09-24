@@ -5,6 +5,8 @@ import { api } from '@/services/api';
 import '@/services/calendarApi';
 import '@/services/chatApi';
 import '@/services/homeApi';
+import '@/services/meetingsApi';
+import '@/services/plansApi';
 
 export const store = configureStore({
   reducer: {

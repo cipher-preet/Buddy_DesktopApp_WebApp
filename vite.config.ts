@@ -26,8 +26,13 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       host: '127.0.0.1',
       proxy: {
-        // Chat lives on FastAPI (AI_Orchestration). Keep this more specific path first.
+        // Chat + speech live on FastAPI (AI_Orchestration). Keep these more specific paths first.
         '/api/v1/chat': {
+          target: env.VITE_CHAT_API_PROXY_TARGET || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/v1/speech': {
           target: env.VITE_CHAT_API_PROXY_TARGET || 'http://127.0.0.1:8000',
           changeOrigin: true,
           secure: false,
@@ -36,6 +41,15 @@ export default defineConfig(({ mode }) => {
           target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
+          // HTML5 video seeking depends on Range / 206 passthrough.
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              const range = req.headers.range;
+              if (typeof range === 'string' && range) {
+                proxyReq.setHeader('Range', range);
+              }
+            });
+          },
         },
       },
     },

@@ -8,30 +8,42 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { GlobalRecordingBar } from '@/components/recording/GlobalRecordingBar';
 import { AiChatPage } from '@/features/ai-chat/AiChatPage';
 import { AuthPage } from '@/features/auth/AuthPage';
-import { setAuthenticatedFromCheck, setUnauthenticated } from '@/features/auth/authSlice';
+import {
+  completeBootstrap,
+  setAuthenticatedFromCheck,
+  setUnauthenticated,
+} from '@/features/auth/authSlice';
+import { bootstrapAuthSession } from '@/features/auth/bootstrapAuthSession';
 import { readAuthSession } from '@/features/auth/authStorage';
 import { CalendarPage } from '@/features/calendar/CalendarPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
 import { MeetingsPage } from '@/features/meetings/MeetingsPage';
+import { PlanGateProvider } from '@/features/settings/PlanGateProvider';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { useLazyCheckAuthQuery, api } from '@/services/api';
 
 type AppRoute = 'home' | 'ai-chat' | 'meetings' | 'calendar' | 'integrations' | 'settings';
-
-const getErrorStatus = (error: unknown): number | string | null => {
-  if (typeof error !== 'object' || !error || !('status' in error)) {
-    return null;
-  }
-
-  return (error as { status?: number | string }).status ?? null;
-};
+type HomeSectionFocus = 'notes' | 'tasks' | 'spaces';
+type SettingsFocus = 'plans' | null;
 
 export const App = () => {
   const dispatch = useAppDispatch();
   const authStatus = useAppSelector((state) => state.auth.status);
   const [activeRoute, setActiveRoute] = useState<AppRoute>('home');
+  const [homeSectionFocus, setHomeSectionFocus] = useState<HomeSectionFocus | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<SettingsFocus>(null);
   const [checkAuth] = useLazyCheckAuthQuery();
+
+  const goHome = (section?: HomeSectionFocus) => {
+    setHomeSectionFocus(section ?? 'spaces');
+    setActiveRoute('home');
+  };
+
+  const openPlans = () => {
+    setActiveRoute('settings');
+    setSettingsFocus('plans');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -47,23 +59,27 @@ export const App = () => {
         return;
       }
 
-      try {
-        const data = await checkAuth(undefined, false).unwrap();
-        if (!cancelled) {
-          dispatch(setAuthenticatedFromCheck({ token: session.token, data }));
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
+      const result = await bootstrapAuthSession(true, async () =>
+        checkAuth(undefined, false).unwrap(),
+      );
 
-        // Keep the local session on network/proxy blips. Only logout when the token is rejected.
-        const status = getErrorStatus(error);
-        if (status === 401 || status === 403) {
-          dispatch(setUnauthenticated());
-          dispatch(api.util.resetApiState());
-        }
+      if (cancelled) {
+        return;
       }
+
+      if (result.kind === 'authenticated') {
+        dispatch(setAuthenticatedFromCheck({ token: session.token, data: result.data }));
+        return;
+      }
+
+      if (result.kind === 'offline') {
+        // Keep local session across flaky refreshes / brief API blips.
+        dispatch(completeBootstrap());
+        return;
+      }
+
+      dispatch(setUnauthenticated());
+      dispatch(api.util.resetApiState());
     };
 
     void validateSession();
@@ -76,7 +92,12 @@ export const App = () => {
   }, []);
 
   const navigationItems = [
-    { label: 'Home', icon: FiHome, isActive: activeRoute === 'home', onSelect: () => setActiveRoute('home') },
+    {
+      label: 'Home',
+      icon: FiHome,
+      isActive: activeRoute === 'home',
+      onSelect: () => goHome('spaces'),
+    },
     {
       label: 'AI Chat',
       icon: RiRobot2Line,
@@ -109,10 +130,19 @@ export const App = () => {
     },
   ];
 
+  if (authStatus === 'bootstrapping') {
+    return (
+      <div className="app-boot-screen" role="status" aria-live="polite">
+        <p>Connecting to Buddy…</p>
+      </div>
+    );
+  }
+
   if (authStatus !== 'authenticated') {
     return (
       <AuthPage
         onAuthenticated={() => {
+          setHomeSectionFocus(null);
           setActiveRoute('home');
         }}
       />
@@ -120,28 +150,41 @@ export const App = () => {
   }
 
   const page = {
-    home: <DashboardPage />,
+    home: (
+      <DashboardPage
+        focusSection={homeSectionFocus}
+        onFocusHandled={() => setHomeSectionFocus(null)}
+      />
+    ),
     'ai-chat': <AiChatPage />,
     meetings: <MeetingsPage />,
     calendar: <CalendarPage />,
     integrations: <IntegrationsPage />,
     settings: (
       <SettingsPage
-        onNavigateHome={() => setActiveRoute('home')}
-        onSignedOut={() => setActiveRoute('home')}
+        focusSection={settingsFocus}
+        onFocusHandled={() => setSettingsFocus(null)}
+        onNavigateHome={goHome}
+        onSignedOut={() => {
+          setHomeSectionFocus(null);
+          setActiveRoute('home');
+        }}
       />
     ),
   }[activeRoute];
 
   return (
-    <RecordingProvider>
-      <AppLayout
-        navigationItems={navigationItems}
-        viewMode={activeRoute === 'ai-chat' ? 'chat' : activeRoute === 'meetings' ? 'wide' : 'default'}
-      >
-        {page}
-      </AppLayout>
-      <GlobalRecordingBar />
-    </RecordingProvider>
+    <PlanGateProvider onOpenPlans={openPlans}>
+      <RecordingProvider>
+        <AppLayout
+          navigationItems={navigationItems}
+          viewMode={activeRoute === 'ai-chat' ? 'chat' : activeRoute === 'meetings' ? 'wide' : 'default'}
+          onOpenSettings={() => setActiveRoute('settings')}
+        >
+          {page}
+        </AppLayout>
+        <GlobalRecordingBar onOpenPlans={openPlans} />
+      </RecordingProvider>
+    </PlanGateProvider>
   );
 };

@@ -21,6 +21,7 @@ import {
   getCalendarErrorMessage,
   minutesToApiTimeLabel,
 } from '@/features/calendar/calendarMappers';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import type {
   CalendarDayItem,
   CalendarEvent,
@@ -179,6 +180,7 @@ const EventChip = ({ event, compact = false }: { event: CalendarEvent; compact?:
 
 export const CalendarPage = () => {
   const { showToast } = useToast();
+  const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
   const today = useMemo(() => {
     const date = new Date();
@@ -493,6 +495,9 @@ export const CalendarPage = () => {
       showToast({ message: 'Event created', type: 'success' });
     } catch (error) {
       const message = getCalendarErrorMessage(error, 'Unable to create event');
+      if (handleApiError(error, message)) {
+        return;
+      }
       setFormError(message);
       showToast({ message: 'Create failed', description: message, type: 'error' });
     }

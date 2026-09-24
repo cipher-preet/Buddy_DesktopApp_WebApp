@@ -1,18 +1,27 @@
 import type { ChatHistoryGroup, ChatMessageDto, ChatSession, ChatSessionDto, ChatThreadMessage } from './chatTypes';
 
-const toDate = (value: string | Date | undefined) => {
+const toIsoTimestamp = (value: string | Date | undefined) => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
     return value;
   }
 
-  if (typeof value === 'string') {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed;
-    }
-  }
+  return new Date().toISOString();
+};
 
-  return new Date();
+const asDate = (value: string | Date) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 };
 
 export const mapChatSession = (session: ChatSessionDto): ChatSession => ({
@@ -20,7 +29,7 @@ export const mapChatSession = (session: ChatSessionDto): ChatSession => ({
   title: session.title?.trim() || 'New chat',
   spaceId: session.spaceId ?? null,
   messageCount: session.messageCount ?? 0,
-  updatedAt: toDate(session.updatedAt),
+  updatedAt: toIsoTimestamp(session.updatedAt),
 });
 
 export const mapChatMessage = (message: ChatMessageDto, index: number): ChatThreadMessage => ({
@@ -38,7 +47,8 @@ export const titleFromQuestion = (question: string) => {
   return `${trimmed.slice(0, 42)}...`;
 };
 
-export const formatHistoryMeta = (date: Date) => {
+export const formatHistoryMeta = (value: string | Date) => {
+  const date = asDate(value);
   const now = new Date();
   const diffMs = Math.max(0, now.getTime() - date.getTime());
   const diffMinutes = Math.floor(diffMs / 60000);
@@ -81,11 +91,8 @@ export const groupChatSessions = (sessions: ChatSession[]): ChatHistoryGroup[] =
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   sessions.forEach((session) => {
-    const startOfDate = new Date(
-      session.updatedAt.getFullYear(),
-      session.updatedAt.getMonth(),
-      session.updatedAt.getDate(),
-    );
+    const date = asDate(session.updatedAt);
+    const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86400000);
 
     if (diffDays <= 0) {

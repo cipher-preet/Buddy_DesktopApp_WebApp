@@ -15,6 +15,7 @@ export type ApiSpace = {
   createdAt?: string;
   updatedAt?: string;
   tasksCount?: number;
+  notesCount?: number;
 };
 
 export type ApiNoteCard = {
@@ -68,6 +69,7 @@ export type WorkspaceSpace = {
   name: string;
   description: string;
   tasksCount: number;
+  notesCount: number;
   updatedAtLabel: string;
 };
 
@@ -76,12 +78,16 @@ export type WorkspaceTask = {
   title: string;
   description: string;
   dueDate: string;
+  dueDateKey: string | null;
+  dueDateTone: 'none' | 'overdue' | 'today' | 'tomorrow' | 'upcoming';
   priority: 'High' | 'Medium' | 'Low';
   status: 'done' | 'open' | 'review';
+  createdAtLabel: string;
 };
 
 export type WorkspaceNote = {
   id: string;
   title: string;
   excerpt: string;
+  dateLabel: string;
 };

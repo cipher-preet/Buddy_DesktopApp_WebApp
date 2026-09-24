@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiAlertCircle,
   FiCalendar,
@@ -6,21 +6,31 @@ import {
   FiFolder,
   FiPlus,
   FiRefreshCw,
-  FiUser,
 } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
 import { useToast } from '@/app/ToastProvider';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import {
   useCreateSpaceMutation,
   useCreateStagedNoteMutation,
   useCreateStagedTaskMutation,
+  useDeleteSpaceMutation,
+  useDeleteStagedNoteMutation,
+  useDeleteStagedTaskMutation,
   useGetSpaceNotesInfiniteQuery,
   useGetSpaceTasksInfiniteQuery,
   useGetUserSpacesInfiniteQuery,
+  useSetStagedTaskStatusMutation,
+  useUpdateSpaceMutation,
+  useUpdateStagedNoteMutation,
+  useUpdateStagedTaskMutation,
 } from '@/services/homeApi';
 
+import { ItemActionsMenu } from './ItemActionsMenu';
+import type { WorkspaceNote, WorkspaceSpace, WorkspaceTask } from './homeTypes';
 import {
+  ConfirmDeleteModal,
   CreateNoteModal,
   CreateSpaceModal,
   CreateTaskModal,
@@ -28,9 +38,26 @@ import {
 
 type ActiveSection = 'tasks' | 'notes';
 type CreateModal = 'space' | 'task' | 'note' | null;
+type HomeSectionFocus = 'notes' | 'tasks' | 'spaces';
+type EditTarget =
+  | { kind: 'space'; space: WorkspaceSpace }
+  | { kind: 'task'; task: WorkspaceTask }
+  | { kind: 'note'; note: WorkspaceNote }
+  | null;
+type DeleteTarget =
+  | { kind: 'space'; id: string; label: string }
+  | { kind: 'task'; id: string; label: string; spaceId: string }
+  | { kind: 'note'; id: string; label: string; spaceId: string }
+  | null;
+
+type DashboardPageProps = {
+  focusSection?: HomeSectionFocus | null;
+  onFocusHandled?: () => void;
+};
 
 const SPACES_PAGE_SIZE = 10;
 const ITEMS_PAGE_SIZE = 10;
+const TASK_STATUS_THROTTLE_MS = 450;
 
 const statusLabel = {
   done: 'Done',
@@ -53,16 +80,22 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
-export const DashboardPage = () => {
+export const DashboardPage = ({ focusSection = null, onFocusHandled }: DashboardPageProps) => {
   const { showToast } = useToast();
+  const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
-  const userName = useAppSelector((state) => state.auth.user?.name) || 'You';
 
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<ActiveSection>('tasks');
   const [createModal, setCreateModal] = useState<CreateModal>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(() => new Set());
+  const [openItemMenuId, setOpenItemMenuId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
+  const taskStatusTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const taskStatusPendingRef = useRef<Map<string, boolean>>(new Map());
 
   const {
     data: spacesData,
@@ -97,6 +130,18 @@ export const DashboardPage = () => {
       return spaces[0].id;
     });
   }, [spaces]);
+
+  useEffect(() => {
+    if (!focusSection) {
+      return;
+    }
+
+    if (focusSection === 'notes' || focusSection === 'tasks') {
+      setActiveSection(focusSection);
+    }
+
+    onFocusHandled?.();
+  }, [focusSection, onFocusHandled]);
 
   const selectedSpace = useMemo(
     () => spaces.find((space) => space.id === selectedSpaceId) ?? null,
@@ -148,10 +193,12 @@ export const DashboardPage = () => {
   const notes = useMemo(() => notesData?.pages.flatMap((page) => page.notes) ?? [], [notesData]);
 
   useEffect(() => {
-    setCompletedTaskIds((current) => {
-      const next = new Set(current);
+    setCompletedTaskIds(() => {
+      const next = new Set<string>();
       for (const task of tasks) {
-        if (task.status === 'done') {
+        const pending = taskStatusPendingRef.current.get(task.id);
+        const isDone = pending ?? task.status === 'done';
+        if (isDone) {
           next.add(task.id);
         }
       }
@@ -159,20 +206,82 @@ export const DashboardPage = () => {
     });
   }, [tasks]);
 
+  useEffect(() => {
+    return () => {
+      for (const timer of taskStatusTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      taskStatusTimersRef.current.clear();
+    };
+  }, []);
+
   const [createSpace] = useCreateSpaceMutation();
   const [createTask] = useCreateStagedTaskMutation();
   const [createNote] = useCreateStagedNoteMutation();
+  const [updateSpace] = useUpdateSpaceMutation();
+  const [updateTask] = useUpdateStagedTaskMutation();
+  const [updateNote] = useUpdateStagedNoteMutation();
+  const [deleteSpace] = useDeleteSpaceMutation();
+  const [deleteTask] = useDeleteStagedTaskMutation();
+  const [deleteNote] = useDeleteStagedNoteMutation();
+  const [setTaskStatus] = useSetStagedTaskStatusMutation();
 
   const toggleTaskCompletion = (taskId: string) => {
+    if (!selectedSpace) {
+      return;
+    }
+
+    const spaceId = selectedSpace.id;
+    const nextDone = !completedTaskIds.has(taskId);
+
     setCompletedTaskIds((currentTaskIds) => {
       const nextTaskIds = new Set(currentTaskIds);
-      if (nextTaskIds.has(taskId)) {
-        nextTaskIds.delete(taskId);
-      } else {
+      if (nextDone) {
         nextTaskIds.add(taskId);
+      } else {
+        nextTaskIds.delete(taskId);
       }
       return nextTaskIds;
     });
+
+    taskStatusPendingRef.current.set(taskId, nextDone);
+
+    const existingTimer = taskStatusTimersRef.current.get(taskId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      taskStatusTimersRef.current.delete(taskId);
+      const done = taskStatusPendingRef.current.get(taskId);
+      if (typeof done !== 'boolean') {
+        return;
+      }
+
+      void setTaskStatus({ taskId, spaceId, done })
+        .unwrap()
+        .then(() => {
+          taskStatusPendingRef.current.delete(taskId);
+        })
+        .catch((error) => {
+          taskStatusPendingRef.current.delete(taskId);
+          setCompletedTaskIds((currentTaskIds) => {
+            const nextTaskIds = new Set(currentTaskIds);
+            if (done) {
+              nextTaskIds.delete(taskId);
+            } else {
+              nextTaskIds.add(taskId);
+            }
+            return nextTaskIds;
+          });
+          showToast({
+            message: getErrorMessage(error, 'Unable to update task status.'),
+            type: 'error',
+          });
+        });
+    }, TASK_STATUS_THROTTLE_MS);
+
+    taskStatusTimersRef.current.set(taskId, timer);
   };
 
   const handleCreateSpace = async (payload: { name: string; description: string }) => {
@@ -196,6 +305,10 @@ export const DashboardPage = () => {
         type: 'success',
       });
     } catch (error) {
+      if (handleApiError(error, getErrorMessage(error, 'Unable to create space'))) {
+        setCreateModal(null);
+        return;
+      }
       showToast({
         message: getErrorMessage(error, 'Unable to create space'),
         type: 'error',
@@ -222,6 +335,7 @@ export const DashboardPage = () => {
         title: payload.title.trim(),
         description: payload.description.trim(),
         date: payload.dueDate || undefined,
+        priority: payload.priority,
       }).unwrap();
 
       setActiveSection('tasks');
@@ -231,6 +345,10 @@ export const DashboardPage = () => {
         type: 'success',
       });
     } catch (error) {
+      if (handleApiError(error, getErrorMessage(error, 'Unable to save task.'))) {
+        setCreateModal(null);
+        return;
+      }
       showToast({
         message: getErrorMessage(error, 'Unable to save task.'),
         type: 'error',
@@ -260,12 +378,157 @@ export const DashboardPage = () => {
         type: 'success',
       });
     } catch (error) {
+      if (handleApiError(error, getErrorMessage(error, 'Unable to save note.'))) {
+        setCreateModal(null);
+        return;
+      }
       showToast({
         message: getErrorMessage(error, 'Unable to save note.'),
         type: 'error',
       });
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleUpdateSpace = async (payload: { name: string; description: string }) => {
+    if (!editTarget || editTarget.kind !== 'space' || isMutating) {
+      return;
+    }
+
+    setIsMutating(true);
+    try {
+      const result = await updateSpace({
+        spaceId: editTarget.space.id,
+        spacename: payload.name.trim(),
+        description: payload.description.trim() || undefined,
+      }).unwrap();
+
+      setEditTarget(null);
+      showToast({
+        message: result.message || 'Space updated.',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to update space.'),
+        type: 'error',
+      });
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleUpdateTask = async (payload: {
+    title: string;
+    description: string;
+    dueDate: string;
+    priority: 'High' | 'Medium' | 'Low';
+  }) => {
+    if (!editTarget || editTarget.kind !== 'task' || !selectedSpace || isMutating) {
+      return;
+    }
+
+    setIsMutating(true);
+    try {
+      const result = await updateTask({
+        taskId: editTarget.task.id,
+        spaceId: selectedSpace.id,
+        title: payload.title.trim(),
+        description: payload.description.trim(),
+        date: payload.dueDate || undefined,
+        priority: payload.priority,
+      }).unwrap();
+
+      setEditTarget(null);
+      showToast({
+        message: result.message || 'Task updated.',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to update task.'),
+        type: 'error',
+      });
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleUpdateNote = async (payload: { title: string; description: string }) => {
+    if (!editTarget || editTarget.kind !== 'note' || !selectedSpace || isMutating) {
+      return;
+    }
+
+    setIsMutating(true);
+    try {
+      const result = await updateNote({
+        noteId: editTarget.note.id,
+        spaceId: selectedSpace.id,
+        title: payload.title.trim(),
+        description: payload.description.trim(),
+      }).unwrap();
+
+      setEditTarget(null);
+      showToast({
+        message: result.message || 'Note updated.',
+        type: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to update note.'),
+        type: 'error',
+      });
+    } finally {
+      setIsMutating(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget || isMutating) {
+      return;
+    }
+
+    setIsMutating(true);
+    try {
+      if (deleteTarget.kind === 'space') {
+        const result = await deleteSpace({ spaceId: deleteTarget.id }).unwrap();
+        if (selectedSpaceId === deleteTarget.id) {
+          setSelectedSpaceId(null);
+        }
+        showToast({
+          message: result.message || 'Space deleted.',
+          type: 'success',
+        });
+      } else if (deleteTarget.kind === 'task') {
+        const result = await deleteTask({
+          taskId: deleteTarget.id,
+          spaceId: deleteTarget.spaceId,
+        }).unwrap();
+        showToast({
+          message: result.message || 'Task deleted.',
+          type: 'success',
+        });
+      } else {
+        const result = await deleteNote({
+          noteId: deleteTarget.id,
+          spaceId: deleteTarget.spaceId,
+        }).unwrap();
+        showToast({
+          message: result.message || 'Note deleted.',
+          type: 'success',
+        });
+      }
+
+      setDeleteTarget(null);
+      setOpenItemMenuId(null);
+    } catch (error) {
+      showToast({
+        message: getErrorMessage(error, 'Unable to delete item.'),
+        type: 'error',
+      });
+    } finally {
+      setIsMutating(false);
     }
   };
 
@@ -322,25 +585,53 @@ export const DashboardPage = () => {
             </div>
           ) : null}
 
-          {spaces.map((space) => (
-            <button
-              className="space-item"
-              data-active={space.id === selectedSpace?.id ? 'true' : undefined}
-              key={space.id}
-              type="button"
-              onClick={() => setSelectedSpaceId(space.id)}
-            >
-              <span className="space-item__icon">
-                <FiFolder aria-hidden="true" size={17} />
-              </span>
-              <span className="space-item__content">
-                <strong>{space.name}</strong>
-                <small>
-                  {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} · {space.updatedAtLabel}
-                </small>
-              </span>
-            </button>
-          ))}
+          {spaces.map((space) => {
+            const menuId = `space:${space.id}`;
+            const isMenuOpen = openItemMenuId === menuId;
+
+            return (
+              <div
+                className={`space-item${isMenuOpen ? ' is-menu-open' : ''}`}
+                data-active={space.id === selectedSpace?.id ? 'true' : undefined}
+                key={space.id}
+              >
+                <button
+                  className="space-item__select"
+                  type="button"
+                  onClick={() => {
+                    setSelectedSpaceId(space.id);
+                    setOpenItemMenuId(null);
+                  }}
+                >
+                  <span className="space-item__icon">
+                    <FiFolder aria-hidden="true" size={17} />
+                  </span>
+                  <span className="space-item__content">
+                    <strong>{space.name}</strong>
+                    <small>
+                      {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} ·{' '}
+                      {space.notesCount} {space.notesCount === 1 ? 'note' : 'notes'} ·{' '}
+                      {space.updatedAtLabel}
+                    </small>
+                  </span>
+                </button>
+                <ItemActionsMenu
+                  itemLabel={space.name}
+                  isOpen={isMenuOpen}
+                  onOpen={() => setOpenItemMenuId(menuId)}
+                  onClose={() => setOpenItemMenuId(null)}
+                  onEdit={() => {
+                    setOpenItemMenuId(null);
+                    setEditTarget({ kind: 'space', space });
+                  }}
+                  onDelete={() => {
+                    setOpenItemMenuId(null);
+                    setDeleteTarget({ kind: 'space', id: space.id, label: space.name });
+                  }}
+                />
+              </div>
+            );
+          })}
 
           {hasMoreSpaces ? (
             <button
@@ -378,7 +669,10 @@ export const DashboardPage = () => {
                   type="button"
                   role="tab"
                   aria-selected={activeSection === 'tasks'}
-                  onClick={() => setActiveSection('tasks')}
+                  onClick={() => {
+                    setActiveSection('tasks');
+                    setOpenItemMenuId(null);
+                  }}
                 >
                   Tasks
                 </button>
@@ -388,7 +682,10 @@ export const DashboardPage = () => {
                   type="button"
                   role="tab"
                   aria-selected={activeSection === 'notes'}
-                  onClick={() => setActiveSection('notes')}
+                  onClick={() => {
+                    setActiveSection('notes');
+                    setOpenItemMenuId(null);
+                  }}
                 >
                   Notes
                 </button>
@@ -446,11 +743,13 @@ export const DashboardPage = () => {
                     <>
                       <div className="task-stack">
                         {tasks.map((task) => {
-                          const isDone = completedTaskIds.has(task.id) || task.status === 'done';
+                          const isDone = completedTaskIds.has(task.id);
+                          const menuId = `task:${task.id}`;
+                          const isMenuOpen = openItemMenuId === menuId;
 
                           return (
                             <article
-                              className="task-card"
+                              className={`task-card${isMenuOpen ? ' is-menu-open' : ''}`}
                               data-status={isDone ? 'done' : task.status}
                               key={task.id}
                             >
@@ -466,20 +765,51 @@ export const DashboardPage = () => {
                                 <h3>{task.title}</h3>
                                 {task.description ? <p>{task.description}</p> : null}
                                 <div className="task-card__meta">
-                                  <span>
+                                  <span
+                                    className="task-card__due"
+                                    data-tone={task.dueDateTone}
+                                  >
                                     <FiCalendar aria-hidden="true" size={13} />
                                     {task.dueDate}
                                   </span>
-                                  <span>
-                                    <FiUser aria-hidden="true" size={13} />
-                                    {userName}
+                                  <span
+                                    className="task-card__priority"
+                                    data-priority={task.priority}
+                                  >
+                                    {task.priority}
                                   </span>
-                                  <span data-priority={task.priority}>{task.priority}</span>
+                                  <span className="task-card__created">
+                                    {task.createdAtLabel}
+                                  </span>
                                 </div>
                               </div>
-                              <span className="task-card__status">
-                                {isDone ? 'Done' : statusLabel[task.status]}
-                              </span>
+                              <div className="task-card__aside">
+                                <span className="task-card__status">
+                                  {isDone ? 'Done' : statusLabel[task.status]}
+                                </span>
+                                <ItemActionsMenu
+                                  itemLabel={task.title}
+                                  isOpen={isMenuOpen}
+                                  onOpen={() => setOpenItemMenuId(menuId)}
+                                  onClose={() => setOpenItemMenuId(null)}
+                                  onEdit={() => {
+                                    setOpenItemMenuId(null);
+                                    setEditTarget({ kind: 'task', task });
+                                  }}
+                                  onDelete={() => {
+                                    setOpenItemMenuId(null);
+                                    if (!selectedSpace) {
+                                      return;
+                                    }
+                                    setDeleteTarget({
+                                      kind: 'task',
+                                      id: task.id,
+                                      label: task.title,
+                                      spaceId: selectedSpace.id,
+                                    });
+                                  }}
+                                />
+                              </div>
                             </article>
                           );
                         })}
@@ -539,17 +869,55 @@ export const DashboardPage = () => {
                   {notes.length > 0 ? (
                     <>
                       <div className="notes-stack">
-                        {notes.map((note) => (
-                          <article className="space-note" key={note.id}>
-                            <span className="space-note__icon">
-                              <FiFileText aria-hidden="true" size={16} />
-                            </span>
-                            <div>
-                              <h3>{note.title}</h3>
-                              {note.excerpt ? <p>{note.excerpt}</p> : null}
-                            </div>
-                          </article>
-                        ))}
+                        {notes.map((note) => {
+                          const menuId = `note:${note.id}`;
+                          const isMenuOpen = openItemMenuId === menuId;
+
+                          return (
+                            <article
+                              className={`space-note${isMenuOpen ? ' is-menu-open' : ''}`}
+                              key={note.id}
+                            >
+                              <span className="space-note__icon">
+                                <FiFileText aria-hidden="true" size={16} />
+                              </span>
+                              <div className="space-note__body">
+                                <div className="space-note__header">
+                                  <h3>{note.title}</h3>
+                                  <ItemActionsMenu
+                                    itemLabel={note.title}
+                                    isOpen={isMenuOpen}
+                                    onOpen={() => setOpenItemMenuId(menuId)}
+                                    onClose={() => setOpenItemMenuId(null)}
+                                    onEdit={() => {
+                                      setOpenItemMenuId(null);
+                                      setEditTarget({ kind: 'note', note });
+                                    }}
+                                    onDelete={() => {
+                                      setOpenItemMenuId(null);
+                                      if (!selectedSpace) {
+                                        return;
+                                      }
+                                      setDeleteTarget({
+                                        kind: 'note',
+                                        id: note.id,
+                                        label: note.title,
+                                        spaceId: selectedSpace.id,
+                                      });
+                                    }}
+                                  />
+                                </div>
+                                {note.excerpt ? <p>{note.excerpt}</p> : null}
+                                <div className="space-note__meta">
+                                  <span>
+                                    <FiCalendar aria-hidden="true" size={13} />
+                                    {note.dateLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
 
                       {hasMoreNotes ? (
@@ -608,6 +976,70 @@ export const DashboardPage = () => {
             }
           }}
           onCreate={handleCreateNote}
+        />
+      ) : null}
+
+      {editTarget?.kind === 'space' ? (
+        <CreateSpaceModal
+          mode="edit"
+          initialName={editTarget.space.name}
+          initialDescription={editTarget.space.description}
+          isSubmitting={isMutating}
+          onClose={() => {
+            if (!isMutating) {
+              setEditTarget(null);
+            }
+          }}
+          onCreate={handleUpdateSpace}
+        />
+      ) : null}
+
+      {editTarget?.kind === 'task' && selectedSpace ? (
+        <CreateTaskModal
+          mode="edit"
+          spaceName={selectedSpace.name}
+          initialTitle={editTarget.task.title}
+          initialDescription={editTarget.task.description}
+          initialDueDate={editTarget.task.dueDateKey}
+          initialPriority={editTarget.task.priority}
+          isSubmitting={isMutating}
+          onClose={() => {
+            if (!isMutating) {
+              setEditTarget(null);
+            }
+          }}
+          onCreate={handleUpdateTask}
+        />
+      ) : null}
+
+      {editTarget?.kind === 'note' && selectedSpace ? (
+        <CreateNoteModal
+          mode="edit"
+          spaceName={selectedSpace.name}
+          initialTitle={editTarget.note.title}
+          initialDescription={editTarget.note.excerpt}
+          isSubmitting={isMutating}
+          onClose={() => {
+            if (!isMutating) {
+              setEditTarget(null);
+            }
+          }}
+          onCreate={handleUpdateNote}
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDeleteModal
+          title={`Delete ${deleteTarget.kind}?`}
+          description={`This will permanently remove “${deleteTarget.label}”. This can’t be undone.`}
+          confirmLabel="Delete"
+          isSubmitting={isMutating}
+          onClose={() => {
+            if (!isMutating) {
+              setDeleteTarget(null);
+            }
+          }}
+          onConfirm={handleConfirmDelete}
         />
       ) : null}
     </section>

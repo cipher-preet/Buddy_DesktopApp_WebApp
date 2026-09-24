@@ -1,23 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  FiChevronDown,
-  FiClock,
-  FiGlobe,
-  FiImage,
-  FiMessageSquare,
-  FiMic,
-  FiX,
-} from 'react-icons/fi';
-import { HiOutlinePencilAlt } from 'react-icons/hi';
+import { FiChevronDown, FiMic } from 'react-icons/fi';
 
 import {
   formatRecordingTime,
-  recordingLanguageOptions,
   recordingMicOptions,
   useRecording,
 } from '@/app/RecordingProvider';
 
-export const GlobalRecordingBar = () => {
+export const GlobalRecordingBar = ({ onOpenPlans: _onOpenPlans }: { onOpenPlans?: () => void }) => {
   const {
     elapsedSeconds,
     isVisible,
@@ -25,25 +15,25 @@ export const GlobalRecordingBar = () => {
     isRecording,
     isPaused,
     isStopping,
-    showBanner,
+    isUploading,
+    pendingUploads,
     selectedMic,
-    selectedLanguage,
+    session,
+    lastError,
     pauseRecording,
     resumeRecording,
     stopRecording,
-    dismissBanner,
     setSelectedMic,
-    setSelectedLanguage,
   } = useRecording();
 
   const [isMicOpen, setIsMicOpen] = useState(false);
-  const [isLanguageOpen, setIsLanguageOpen] = useState(false);
+  const [isStopPending, setIsStopPending] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isVisible) {
       setIsMicOpen(false);
-      setIsLanguageOpen(false);
+      setIsStopPending(false);
     }
   }, [isVisible]);
 
@@ -51,7 +41,6 @@ export const GlobalRecordingBar = () => {
     const handlePointerDown = (event: MouseEvent) => {
       if (!barRef.current?.contains(event.target as Node)) {
         setIsMicOpen(false);
-        setIsLanguageOpen(false);
       }
     };
 
@@ -63,52 +52,41 @@ export const GlobalRecordingBar = () => {
     return null;
   }
 
+  const stateLabel = isStarting
+    ? 'Starting'
+    : isStopping || isStopPending
+      ? 'Stopping'
+      : isUploading
+        ? 'Uploading'
+        : isPaused
+          ? 'Paused'
+          : 'Listening';
+
+  const detailLabel = isUploading
+    ? `${pendingUploads} chunk${pendingUploads === 1 ? '' : 's'}`
+    : session?.spaceName || 'Buddy';
+
   return (
     <div className="global-recording-layer" aria-live="polite">
-      {showBanner ? (
-        <div className="global-recording-banner">
-          <span className="global-recording-banner__content">
-            <FiClock aria-hidden="true" size={14} />
-            <span>
-              You can view up to 30 minutes of transcription per conversation.{' '}
-              <button type="button" className="global-recording-banner__link">
-                View plans
-              </button>
-            </span>
-          </span>
-          <button type="button" className="global-recording-banner__close" onClick={dismissBanner} aria-label="Dismiss">
-            <FiX aria-hidden="true" size={14} />
-          </button>
-        </div>
-      ) : null}
-
       <div
         ref={barRef}
-        className={`global-recording-bar${isStarting ? ' is-starting' : ''}${isRecording ? ' is-recording' : ''}${isPaused ? ' is-paused' : ''}${isStopping ? ' is-stopping' : ''}`}
+        className={`global-recording-bar global-recording-bar--compact${isStarting ? ' is-starting' : ''}${isRecording ? ' is-recording' : ''}${isPaused ? ' is-paused' : ''}${isStopping || isStopPending ? ' is-stopping' : ''}${isUploading ? ' is-uploading' : ''}`}
         role="region"
         aria-label="Recording controls"
       >
-        <div className="global-recording-bar__wave" aria-hidden="true">
-          {Array.from({ length: 28 }).map((_, index) => (
-            <span key={index} style={{ animationDelay: `${index * 45}ms` }} />
-          ))}
-        </div>
-
         <div className="global-recording-bar__controls">
           <div className="global-recording-bar__left">
             <div className={`global-recording-select${isMicOpen ? ' is-open' : ''}`}>
               <button
                 type="button"
-                className="global-recording-select__trigger"
+                className="global-recording-select__trigger global-recording-select__trigger--icon"
                 aria-expanded={isMicOpen}
-                onClick={() => {
-                  setIsMicOpen((open) => !open);
-                  setIsLanguageOpen(false);
-                }}
+                aria-label={`Microphone: ${selectedMic}`}
+                disabled={isStarting || isStopping || isStopPending}
+                onClick={() => setIsMicOpen((open) => !open)}
               >
-                <FiMic aria-hidden="true" size={13} />
-                <span>{selectedMic}</span>
-                <FiChevronDown aria-hidden="true" size={12} />
+                <FiMic aria-hidden="true" size={14} />
+                <FiChevronDown aria-hidden="true" size={11} />
               </button>
               {isMicOpen ? (
                 <div className="global-recording-select__menu" role="listbox">
@@ -131,77 +109,57 @@ export const GlobalRecordingBar = () => {
               ) : null}
             </div>
 
-            <div className={`global-recording-select global-recording-select--language${isLanguageOpen ? ' is-open' : ''}`}>
-              <button
-                type="button"
-                className="global-recording-select__trigger"
-                aria-expanded={isLanguageOpen}
-                onClick={() => {
-                  setIsLanguageOpen((open) => !open);
-                  setIsMicOpen(false);
-                }}
-              >
-                <FiGlobe aria-hidden="true" size={13} />
-                <span>{selectedLanguage}</span>
-                <FiChevronDown aria-hidden="true" size={12} />
-              </button>
-              {isLanguageOpen ? (
-                <div className="global-recording-select__menu" role="listbox">
-                  {recordingLanguageOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      role="option"
-                      aria-selected={option === selectedLanguage}
-                      className={option === selectedLanguage ? 'is-selected' : undefined}
-                      onClick={() => {
-                        setSelectedLanguage(option);
-                        setIsLanguageOpen(false);
-                      }}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+            <div className="global-recording-bar__status" title={`${stateLabel} · ${detailLabel}`}>
+              <span
+                className={`global-recording-bar__live${isPaused || isStarting ? ' is-idle' : ''}`}
+                aria-hidden="true"
+              />
+              <span className="global-recording-bar__status-copy">
+                <strong>{stateLabel}</strong>
+                <em>{detailLabel}</em>
+              </span>
             </div>
+          </div>
+
+          <div className="global-recording-bar__wave" aria-hidden="true">
+            {Array.from({ length: 16 }).map((_, index) => (
+              <span key={index} style={{ animationDelay: `${index * 45}ms` }} />
+            ))}
           </div>
 
           <div className="global-recording-bar__center">
             {isStarting ? (
               <div className="global-recording-bar__starting">
                 <span className="global-recording-bar__spinner" aria-hidden="true" />
-                <span>Starting microphone...</span>
+                <span>Starting…</span>
               </div>
             ) : (
               <>
                 <button
                   type="button"
                   className="global-recording-bar__pause"
+                  disabled={isStopping || isStopPending}
                   onClick={isPaused ? resumeRecording : pauseRecording}
                 >
                   {isPaused ? 'Resume' : 'Pause'}
                 </button>
                 <strong className="global-recording-bar__timer">{formatRecordingTime(elapsedSeconds)}</strong>
-                <button type="button" className="global-recording-bar__stop" onClick={stopRecording}>
-                  Stop
+                <button
+                  type="button"
+                  className="global-recording-bar__stop"
+                  disabled={isStopping || isStopPending}
+                  onClick={() => {
+                    setIsStopPending(true);
+                    void stopRecording().finally(() => setIsStopPending(false));
+                  }}
+                >
+                  {isStopping || isStopPending ? 'Stopping…' : 'Stop'}
                 </button>
               </>
             )}
           </div>
-
-          <div className="global-recording-bar__tools">
-            <button type="button" aria-label="Highlight transcript">
-              <HiOutlinePencilAlt aria-hidden="true" size={17} />
-            </button>
-            <button type="button" aria-label="Add comment">
-              <FiMessageSquare aria-hidden="true" size={17} />
-            </button>
-            <button type="button" aria-label="Attach image">
-              <FiImage aria-hidden="true" size={17} />
-            </button>
-          </div>
         </div>
+        {lastError ? <p className="global-recording-bar__error">{lastError}</p> : null}
       </div>
     </div>
   );

@@ -1,24 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { IconType } from 'react-icons';
 import {
   FiBell,
   FiChevronsLeft,
   FiChevronsRight,
   FiDownload,
-  FiGift,
   FiList,
   FiMenu,
-  FiMic,
   FiSearch,
   FiShare2,
   FiX,
 } from 'react-icons/fi';
-import { RiRobot2Line } from 'react-icons/ri';
+import { RiMic2Line, RiRobot2Line } from 'react-icons/ri';
 
 import { useRecording } from '@/app/RecordingProvider';
+import { useAppSelector } from '@/app/hooks';
 import { BrandLogo } from '@/components/common/BrandLogo';
 import { NotificationsDropdown } from '@/components/layout/NotificationsDropdown';
 import { SidePanelContent, type SidePanelTab } from '@/components/layout/SidePanelContent';
+import { StartListeningModal } from '@/components/recording/StartListeningModal';
+import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
+import { useGetPlanStatusQuery } from '@/services/plansApi';
 
 export type NavigationItem = {
   label: string;
@@ -31,6 +34,7 @@ type AppLayoutProps = {
   children: ReactNode;
   navigationItems: NavigationItem[];
   viewMode?: 'default' | 'chat' | 'wide';
+  onOpenSettings?: () => void;
 };
 
 const panelTabs: { id: SidePanelTab; label: string }[] = [
@@ -41,18 +45,123 @@ const panelTabs: { id: SidePanelTab; label: string }[] = [
 
 const DRAWER_BREAKPOINT = 900;
 const PANEL_OVERLAY_BREAKPOINT = 1100;
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
-export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: AppLayoutProps) => {
+const formatRemainingRecording = (limitHours?: number, usedMs?: number) => {
+  if (limitHours === undefined || limitHours === null) {
+    return { label: 'Recording quota unavailable', remainingMs: 0, progress: 0, unlimited: false };
+  }
+
+  if (limitHours < 0) {
+    return { label: 'Unlimited recording left', remainingMs: -1, progress: 1, unlimited: true };
+  }
+
+  const limitMs = limitHours * MS_PER_HOUR;
+  const consumedMs = Math.max(0, usedMs || 0);
+  const remainingMs = Math.max(0, limitMs - consumedMs);
+  const progress = limitMs > 0 ? Math.min(1, consumedMs / limitMs) : 0;
+
+  const totalMinutes = Math.floor(remainingMs / MS_PER_MINUTE);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (remainingMs <= 0) {
+    return { label: '0h 0m remaining', remainingMs: 0, progress: 1, unlimited: false };
+  }
+
+  if (hours <= 0) {
+    return {
+      label: `${minutes}m remaining`,
+      remainingMs,
+      progress,
+      unlimited: false,
+    };
+  }
+
+  return {
+    label: `${hours}h ${minutes}m remaining`,
+    remainingMs,
+    progress,
+    unlimited: false,
+  };
+};
+
+export const AppLayout = ({
+  children,
+  navigationItems,
+  viewMode = 'default',
+  onOpenSettings,
+}: AppLayoutProps) => {
+  const { openPlanUpgrade, promptPlanUpgrade } = usePlanGate();
+  const authUser = useAppSelector((state) => state.auth.user);
+  const userId = authUser?.userId || '';
+  const {
+    data: planStatus,
+    isLoading: isPlanStatusLoading,
+    isError: isPlanStatusError,
+  } = useGetPlanStatusQuery({ userId }, { skip: !userId });
+
+  const planCode = planStatus?.plan?.code || planStatus?.subscription?.planCode || 'free';
+  const planName = planStatus?.plan?.name || 'Free';
+  const isFreePlan = planCode === 'free';
+  const recordingSummary = useMemo(
+    () =>
+      formatRemainingRecording(
+        planStatus?.plan?.limits?.recordingHours,
+        planStatus?.usage?.recordingMs,
+      ),
+    [planStatus?.plan?.limits?.recordingHours, planStatus?.usage?.recordingMs],
+  );
+
+  const planBenefit = useMemo(() => {
+    const feature = planStatus?.plan?.features?.[0];
+    if (feature) {
+      return feature;
+    }
+    if (isFreePlan) {
+      return 'Upgrade for more recording time';
+    }
+    return 'Premium benefits active';
+  }, [isFreePlan, planStatus?.plan?.features]);
+
   const [isMeetingPanelCollapsed, setIsMeetingPanelCollapsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDrawerViewport, setIsDrawerViewport] = useState(false);
+  const [isListeningPickerOpen, setIsListeningPickerOpen] = useState(false);
   const [activePanelTab, setActivePanelTab] = useState<SidePanelTab>('meetings');
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
-  const { startRecording, isStarting, isVisible: isRecordingVisible } = useRecording();
+  const { startListening, isStarting, isVisible: isRecordingVisible } = useRecording();
   const isChatView = viewMode === 'chat';
   const hideSidePanel = viewMode === 'chat' || viewMode === 'wide';
+
+  const openListeningPicker = () => {
+    if (
+      !isPlanStatusLoading &&
+      !recordingSummary.unlimited &&
+      recordingSummary.remainingMs <= 0
+    ) {
+      promptPlanUpgrade({
+        message: 'Recording time limit reached for your plan. Upgrade to continue recording.',
+        resource: 'recordingHours',
+        planCode,
+      });
+      return;
+    }
+
+    if (isRecordingVisible || isStarting) {
+      return;
+    }
+
+    setIsListeningPickerOpen(true);
+  };
+
+  const handleConfirmListening = async (space: WorkspaceSpace) => {
+    await startListening({ spaceId: space.id, spaceName: space.name });
+    setIsListeningPickerOpen(false);
+  };
 
   useEffect(() => {
     const drawerQuery = window.matchMedia(`(max-width: ${DRAWER_BREAKPOINT}px)`);
@@ -189,18 +298,22 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
           </div>
         </div>
 
-        <button className="account-card" type="button">
-          <span className="avatar">P</span>
-          <span className="account-card__text">
-            <strong>Preet Kumar</strong>
-            <small>ps1535146@gmail.com</small>
-          </span>
-        </button>
-
-        <button className="upgrade-card" type="button">
-          <FiGift aria-hidden="true" size={20} />
-          <span>Get Pro For Free</span>
-        </button>
+        <div className="account-panel">
+          <button
+            className="account-card"
+            type="button"
+            onClick={() => onOpenSettings?.()}
+            aria-label="Open account settings"
+          >
+            <span className="avatar">
+              {(authUser?.name || authUser?.email || 'B').charAt(0).toUpperCase()}
+            </span>
+            <span className="account-card__text">
+              <strong>{authUser?.name || 'Buddy User'}</strong>
+              <small>{authUser?.email || authUser?.phone || 'No email added'}</small>
+            </span>
+          </button>
+        </div>
 
         <nav className="nav-list">
           {navigationItems.map((item) => {
@@ -233,13 +346,30 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
 
           <div className="plan-card">
             <div className="plan-card__row">
-              <strong>Basic</strong>
-              <span />
+              <strong>
+                {isPlanStatusLoading ? 'Loading…' : isPlanStatusError ? 'Plan' : planName}
+              </strong>
+              <span
+                className="plan-card__meter"
+                aria-hidden="true"
+                style={{ '--plan-progress': String(recordingSummary.progress) } as CSSProperties}
+              />
             </div>
-            <p>
-              <strong>1 of 160</strong> monthly mins used
+            <p className="plan-card__usage">
+              {isPlanStatusLoading
+                ? 'Checking recording quota…'
+                : isPlanStatusError
+                  ? 'Unable to load plan usage'
+                  : recordingSummary.label}
             </p>
-            <button type="button">Get Buddy Pro</button>
+            <small className="plan-card__benefit">{planBenefit}</small>
+            <button
+              type="button"
+              disabled={isPlanStatusLoading}
+              onClick={() => openPlanUpgrade()}
+            >
+              {isFreePlan ? 'Get Buddy Pro' : 'Manage plan'}
+            </button>
           </div>
         </div>
       </aside>
@@ -274,13 +404,13 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
                   className={`toolbar-button toolbar-button--record${isStarting ? ' is-loading' : ''}`}
                   type="button"
                   disabled={isStarting}
-                  onClick={startRecording}
+                  onClick={openListeningPicker}
                   aria-label={isStarting ? 'Starting recording' : 'Start recording'}
                 >
                   {isStarting ? (
                     <span className="toolbar-button__spinner" aria-hidden="true" />
                   ) : (
-                    <FiMic aria-hidden="true" size={16} strokeWidth={2.25} />
+                    <RiMic2Line className="toolbar-button__mic" aria-hidden="true" />
                   )}
                   <span>{isStarting ? 'Starting...' : 'Record'}</span>
                 </button>
@@ -346,7 +476,7 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
                 </div>
 
                 <div className="meeting-panel__content" data-tab={activePanelTab}>
-                  <SidePanelContent activeTab={activePanelTab} onStartRecording={startRecording} />
+                  <SidePanelContent activeTab={activePanelTab} onStartRecording={openListeningPicker} />
                 </div>
               </aside>
             </>
@@ -371,6 +501,13 @@ export const AppLayout = ({ children, navigationItems, viewMode = 'default' }: A
           ) : null}
         </div>
       </div>
+
+      {isListeningPickerOpen ? (
+        <StartListeningModal
+          onClose={() => setIsListeningPickerOpen(false)}
+          onConfirm={handleConfirmListening}
+        />
+      ) : null}
     </div>
   );
 };

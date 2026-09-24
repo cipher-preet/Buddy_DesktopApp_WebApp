@@ -21,6 +21,106 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 let mainWindow: BrowserWindow | null = null;
+let checkoutSessionActive = false;
+const checkoutWindows = new Set<BrowserWindow>();
+let closeCheckoutTimer: NodeJS.Timeout | null = null;
+
+const isHttpUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+const isRazorpayCheckoutUrl = (url: string) => {
+  if (url === 'about:blank' || url.startsWith('about:blank')) {
+    return true;
+  }
+
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === 'razorpay.com' ||
+      host.endsWith('.razorpay.com') ||
+      host.endsWith('.razorpay.in') ||
+      host.includes('razorpay')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const closeCheckoutWindows = () => {
+  for (const checkoutWindow of [...checkoutWindows]) {
+    if (!checkoutWindow.isDestroyed()) {
+      checkoutWindow.destroy();
+    }
+  }
+  checkoutWindows.clear();
+};
+
+const scheduleCloseCheckoutWindows = () => {
+  if (closeCheckoutTimer) {
+    clearTimeout(closeCheckoutTimer);
+  }
+
+  // Give Razorpay time to post the success payload back to the opener.
+  closeCheckoutTimer = setTimeout(() => {
+    closeCheckoutTimer = null;
+    if (!checkoutSessionActive) {
+      closeCheckoutWindows();
+    }
+  }, 1800);
+};
+
+const allowCheckoutWindow = (parent?: BrowserWindow | null) => ({
+  action: 'allow' as const,
+  overrideBrowserWindowOptions: {
+    parent: parent && !parent.isDestroyed() ? parent : mainWindow ?? undefined,
+    modal: false,
+    width: 520,
+    height: 760,
+    minWidth: 420,
+    minHeight: 560,
+    show: true,
+    autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      javascript: true,
+    },
+  },
+});
+
+const wireCheckoutWindow = (window: BrowserWindow) => {
+  checkoutWindows.add(window);
+  window.setMenuBarVisibility(false);
+
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    // Bank OTP / 3DS / UPI flows open nested windows from the first checkout popup.
+    if (checkoutSessionActive && (isRazorpayCheckoutUrl(url) || isHttpUrl(url))) {
+      return allowCheckoutWindow(window);
+    }
+
+    if (isHttpUrl(url)) {
+      void shell.openExternal(url);
+    }
+
+    return { action: 'deny' };
+  });
+
+  window.webContents.on('did-create-window', (childWindow) => {
+    wireCheckoutWindow(childWindow);
+  });
+
+  window.on('closed', () => {
+    checkoutWindows.delete(window);
+  });
+};
 
 const SCROLLBAR_CSS = `
 html, body, #root, * {
@@ -159,8 +259,25 @@ const createMainWindow = () => {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    const isBlankCheckoutFrame = url === 'about:blank' || url.startsWith('about:blank');
+    const isCheckoutPopup =
+      checkoutSessionActive && (isBlankCheckoutFrame || isRazorpayCheckoutUrl(url) || isHttpUrl(url));
+
+    if (isCheckoutPopup) {
+      return allowCheckoutWindow(mainWindow);
+    }
+
+    if (isHttpUrl(url)) {
+      void shell.openExternal(url);
+    }
+
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('did-create-window', (childWindow) => {
+    if (checkoutSessionActive) {
+      wireCheckoutWindow(childWindow);
+    }
   });
 
   // Application menu is hidden, so wire common shortcuts manually.
@@ -207,6 +324,21 @@ ipcMain.handle('app:get-info', (): AppInfo => {
   };
 });
 
+ipcMain.handle('payments:checkout-session', (_event, active: unknown) => {
+  const nextActive = active === true;
+  checkoutSessionActive = nextActive;
+
+  if (nextActive) {
+    if (closeCheckoutTimer) {
+      clearTimeout(closeCheckoutTimer);
+      closeCheckoutTimer = null;
+    }
+    return;
+  }
+
+  scheduleCloseCheckoutWindows();
+});
+
 void app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createMainWindow();
@@ -219,6 +351,7 @@ void app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  closeCheckoutWindows();
   if (process.platform !== 'darwin') {
     app.quit();
   }

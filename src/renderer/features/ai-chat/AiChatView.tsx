@@ -22,6 +22,7 @@ import {
   groupChatSessions,
   titleFromQuestion,
 } from '@/features/ai-chat/chatUtils';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import {
   useAskBuddyMutation,
   useCreateChatSessionMutation,
@@ -43,6 +44,7 @@ const SUGGESTIONS = [
 
 export const AiChatView = ({ compact = false }: AiChatViewProps) => {
   const { showToast } = useToast();
+  const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
   const userName = useAppSelector((state) => state.auth.user?.name) || 'there';
 
@@ -92,7 +94,9 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
 
   const sessions = useMemo(() => {
     const items = sessionsData?.pages.flatMap((page) => page.chats) ?? [];
-    return [...items].sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+    return [...items].sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    );
   }, [sessionsData]);
 
   const historyGroups = useMemo(() => groupChatSessions(sessions), [sessions]);
@@ -112,8 +116,10 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const headerTitle = useMemo(() => {
+    const emptyTitle = compact ? 'AI Chat' : 'New chat';
+
     if (!activeSessionId) {
-      return 'New chat';
+      return emptyTitle;
     }
 
     if (activeSession?.title && activeSession.title !== 'New chat') {
@@ -121,8 +127,8 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
     }
 
     const firstUserMessage = messages.find((message) => message.role === 'user' && message.content.trim());
-    return firstUserMessage ? titleFromQuestion(firstUserMessage.content) : 'New chat';
-  }, [activeSession, activeSessionId, messages]);
+    return firstUserMessage ? titleFromQuestion(firstUserMessage.content) : emptyTitle;
+  }, [activeSession, activeSessionId, compact, messages]);
 
   const sessionsErrorMessage = isSessionsError
     ? getChatErrorMessage(sessionsError, 'Unable to load chat history')
@@ -300,7 +306,12 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
         userId,
         question: trimmed,
         ...(sessionId ? { chatId: sessionId } : {}),
-        ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+        ...(selectedSpaceIds.length > 0
+          ? {
+              spaceId: selectedSpaceIds[0],
+              spaceIds: selectedSpaceIds,
+            }
+          : {}),
       }).unwrap();
 
       if (result.chatId && result.chatId !== sessionId) {
@@ -317,6 +328,9 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
       ]);
     } catch (error) {
       const message = getChatErrorMessage(error, 'Buddy could not answer that question');
+      if (handleApiError(error, message)) {
+        return;
+      }
       setMessages((current) => [
         ...current,
         {
@@ -380,89 +394,91 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
       className={`ai-chat-page${compact ? ' ai-chat-page--panel' : ''}`}
       aria-label="AI Chat"
     >
-      <header className="ai-chat-header">
-        <div className="ai-chat-history-anchor" ref={historyAnchorRef}>
-          <button
-            className="ai-chat-title"
-            type="button"
-            aria-expanded={isHistoryOpen}
-            aria-haspopup="dialog"
-            onClick={() => {
-              setIsHistoryOpen((isOpen) => !isOpen);
-              setIsContextOpen(false);
-            }}
-          >
-            <RiRobot2Line aria-hidden="true" size={18} />
-            <span>{headerTitle}</span>
-            <FiChevronDown aria-hidden="true" size={14} />
-          </button>
+      {compact ? null : (
+        <header className="ai-chat-header">
+          <div className="ai-chat-history-anchor" ref={historyAnchorRef}>
+            <button
+              className="ai-chat-title"
+              type="button"
+              aria-expanded={isHistoryOpen}
+              aria-haspopup="dialog"
+              onClick={() => {
+                setIsHistoryOpen((isOpen) => !isOpen);
+                setIsContextOpen(false);
+              }}
+            >
+              <RiRobot2Line aria-hidden="true" size={18} />
+              <span>{headerTitle}</span>
+              <FiChevronDown aria-hidden="true" size={14} />
+            </button>
 
-          {isHistoryOpen ? (
-            <div className="chat-history-popover" role="dialog" aria-label="Chat history">
-              {showSessionsInitialLoading ? (
-                <div className="ai-chat-inline-state" aria-busy="true">
-                  <span className="home-spinner" />
-                  <p>Loading chats…</p>
-                </div>
-              ) : null}
+            {isHistoryOpen ? (
+              <div className="chat-history-popover" role="dialog" aria-label="Chat history">
+                {showSessionsInitialLoading ? (
+                  <div className="ai-chat-inline-state" aria-busy="true">
+                    <span className="home-spinner" />
+                    <p>Loading chats…</p>
+                  </div>
+                ) : null}
 
-              {sessionsErrorMessage && sessions.length === 0 ? (
-                <div className="ai-chat-inline-state ai-chat-inline-state--error" role="alert">
-                  <FiAlertCircle aria-hidden="true" size={16} />
-                  <p>{sessionsErrorMessage}</p>
-                  <button className="home-retry-button" type="button" onClick={() => void refetchSessions()}>
-                    <FiRefreshCw aria-hidden="true" size={14} />
-                    Retry
-                  </button>
-                </div>
-              ) : null}
-
-              {!showSessionsInitialLoading && !sessionsErrorMessage && sessions.length === 0 ? (
-                <div className="ai-chat-inline-state">
-                  <p>No chats yet</p>
-                  <span>Start a conversation and it will show up here.</span>
-                </div>
-              ) : null}
-
-              {historyGroups.map((group) => (
-                <section key={group.label}>
-                  <h2>{group.label}</h2>
-                  {group.sessions.map((session) => (
-                    <button
-                      className={`chat-history-item${session.id === activeSessionId ? ' is-active' : ''}`}
-                      type="button"
-                      key={session.id}
-                      onClick={() => void handleSelectSession(session.id)}
-                    >
-                      <strong>{session.title}</strong>
-                      <span>{formatHistoryMeta(session.updatedAt)}</span>
+                {sessionsErrorMessage && sessions.length === 0 ? (
+                  <div className="ai-chat-inline-state ai-chat-inline-state--error" role="alert">
+                    <FiAlertCircle aria-hidden="true" size={16} />
+                    <p>{sessionsErrorMessage}</p>
+                    <button className="home-retry-button" type="button" onClick={() => void refetchSessions()}>
+                      <FiRefreshCw aria-hidden="true" size={14} />
+                      Retry
                     </button>
-                  ))}
-                </section>
-              ))}
+                  </div>
+                ) : null}
 
-              {hasMoreSessions ? (
-                <button
-                  className="home-load-more"
-                  type="button"
-                  disabled={isFetchingMoreSessions}
-                  onClick={() => void fetchNextSessionsPage()}
-                >
-                  {isFetchingMoreSessions ? 'Loading…' : 'Load more'}
-                </button>
-              ) : null}
+                {!showSessionsInitialLoading && !sessionsErrorMessage && sessions.length === 0 ? (
+                  <div className="ai-chat-inline-state">
+                    <p>No chats yet</p>
+                    <span>Start a conversation and it will show up here.</span>
+                  </div>
+                ) : null}
 
-              {isSessionsFetching && !isSessionsLoading && !isFetchingMoreSessions ? (
-                <p className="home-sync-hint">Refreshing…</p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <button className="ai-chat-new" type="button" onClick={handleNewChat} disabled={isSending}>
-          <FiEdit2 aria-hidden="true" size={16} />
-          <span>New</span>
-        </button>
-      </header>
+                {historyGroups.map((group) => (
+                  <section key={group.label}>
+                    <h2>{group.label}</h2>
+                    {group.sessions.map((session) => (
+                      <button
+                        className={`chat-history-item${session.id === activeSessionId ? ' is-active' : ''}`}
+                        type="button"
+                        key={session.id}
+                        onClick={() => void handleSelectSession(session.id)}
+                      >
+                        <strong>{session.title}</strong>
+                        <span>{formatHistoryMeta(session.updatedAt)}</span>
+                      </button>
+                    ))}
+                  </section>
+                ))}
+
+                {hasMoreSessions ? (
+                  <button
+                    className="home-load-more"
+                    type="button"
+                    disabled={isFetchingMoreSessions}
+                    onClick={() => void fetchNextSessionsPage()}
+                  >
+                    {isFetchingMoreSessions ? 'Loading…' : 'Load more'}
+                  </button>
+                ) : null}
+
+                {isSessionsFetching && !isSessionsLoading && !isFetchingMoreSessions ? (
+                  <p className="home-sync-hint">Refreshing…</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <button className="ai-chat-new" type="button" onClick={handleNewChat} disabled={isSending}>
+            <FiEdit2 aria-hidden="true" size={16} />
+            <span>New</span>
+          </button>
+        </header>
+      )}
 
       <div className="ai-chat-scroll">
         {isThreadLoading ? (
@@ -495,14 +511,20 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
               <RiRobot2Line aria-hidden="true" size={22} />
             </span>
             <h2>Hi {userName}</h2>
-            <p>Ask anything about your conversations, notes, and tasks.</p>
-            <div className="ai-chat-suggestions">
-              {SUGGESTIONS.map((suggestion) => (
-                <button key={suggestion} type="button" onClick={() => void handleSend(suggestion)}>
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <p>
+              {compact
+                ? 'Ask anything about this meeting.'
+                : 'Ask anything about your conversations, notes, and tasks.'}
+            </p>
+            {!compact ? (
+              <div className="ai-chat-suggestions">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button key={suggestion} type="button" onClick={() => void handleSend(suggestion)}>
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -681,7 +703,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
           <textarea
             ref={composerRef}
             placeholder="Ask anything about your conversations"
-            rows={compact ? 2 : 2}
+            rows={compact ? 1 : 2}
             value={draft}
             disabled={isSending || isThreadLoading}
             onChange={(event) => setDraft(event.target.value)}

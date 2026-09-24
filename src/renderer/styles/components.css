@@ -59,30 +59,40 @@
 }
 
 .toolbar-button--record {
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 18px;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 16px 0 14px;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   color: #ffffff;
   background: #1355ff;
   box-shadow: none;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
+  font-size: 0.875rem;
+  font-weight: 700;
   letter-spacing: 0;
+  line-height: 1;
   transition:
     background 160ms ease,
     transform 160ms ease;
 }
 
+.toolbar-button__mic {
+  display: block;
+  width: 0.95em;
+  height: 0.95em;
+  flex-shrink: 0;
+  color: #ffffff;
+  stroke-width: 0;
+}
+
 .toolbar-button--record:hover:not(:disabled) {
-  background: #0f4bf0;
+  background: #0c46e8;
   box-shadow: none;
   transform: none;
 }
 
 .toolbar-button--record:active:not(:disabled) {
-  background: #0c46e8;
+  background: #0a3dcc;
   transform: scale(0.98);
 }
 
@@ -167,15 +177,47 @@
 
 .plan-card__row {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-2);
 }
 
-.plan-card__row span {
-  height: 5px;
+.plan-card__row strong {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.plan-card__meter {
+  position: relative;
+  display: block;
+  height: 6px;
+  overflow: hidden;
   border-radius: var(--radius-pill);
   background: #e6ebf4;
+}
+
+.plan-card__meter::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--plan-progress, 0) * 100%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-primary), #4f7cff);
+}
+
+.plan-card__usage {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+}
+
+.plan-card__benefit {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
 }
 
 .plan-card button {
@@ -184,6 +226,17 @@
   color: var(--color-primary);
   background: transparent;
   font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.plan-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.plan-card button:hover:not(:disabled) {
+  color: #fff;
+  background: var(--color-primary);
 }
 
 .meeting-tabs {

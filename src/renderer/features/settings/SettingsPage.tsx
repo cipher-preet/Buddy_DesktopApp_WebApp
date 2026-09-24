@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  FiAlertCircle,
   FiArrowRight,
   FiCheckSquare,
   FiChevronDown,
@@ -11,6 +12,7 @@ import {
   FiLogOut,
   FiMail,
   FiMessageSquare,
+  FiRefreshCw,
   FiSend,
   FiTag,
   FiTrash2,
@@ -18,19 +20,26 @@ import {
 } from 'react-icons/fi';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { setUnauthenticated } from '@/features/auth/authSlice';
+import { useToast } from '@/app/ToastProvider';
+import { setUnauthenticated, updateAuthUser } from '@/features/auth/authSlice';
 import {
   api,
   useDeleteAccountMutation,
   useLogoutMutation,
   useRaiseSupportTicketMutation,
   useSubmitFeedbackMutation,
+  useUpdateProfileMutation,
 } from '@/services/api';
+import { useGetProfileSummaryQuery } from '@/services/homeApi';
+import { useGetPlanStatusQuery } from '@/services/plansApi';
 
 import { PlanDetailsModal } from './PlanDetailsModal';
+import { getApiErrorMessage, type PlanId } from './planCatalog';
 
 type SettingsPageProps = {
-  onNavigateHome?: () => void;
+  focusSection?: 'plans' | null;
+  onFocusHandled?: () => void;
+  onNavigateHome?: (section?: 'notes' | 'tasks' | 'spaces') => void;
   onSignedOut?: () => void;
 };
 
@@ -116,55 +125,43 @@ const CustomDropdown = ({ id, label, options, value, isOpen, onOpenChange, onCha
   );
 };
 
-const workspaceItems = [
+const workspaceItems: {
+  title: string;
+  subtitle: string;
+  icon: typeof FiFileText;
+  section: 'notes' | 'tasks' | 'spaces';
+}[] = [
   {
     title: 'Notes',
     subtitle: 'Open and manage your notes',
     icon: FiFileText,
+    section: 'notes',
   },
   {
     title: 'Tasks',
     subtitle: 'Track what needs to get done',
     icon: FiCheckSquare,
+    section: 'tasks',
   },
   {
     title: 'Spaces',
     subtitle: 'Jump back to your workspaces',
     icon: FiFolder,
+    section: 'spaces',
   },
 ];
 
-const accountItems: {
-  title: string;
-  subtitle: string;
-  value?: string;
-  icon: typeof FiFileText;
-  action: AccountAction;
-}[] = [
-  {
-    title: 'Plan',
-    subtitle: 'View and manage subscription',
-    value: 'Free',
-    icon: FiCreditCard,
-    action: 'plan',
-  },
-  {
-    title: 'Feedback',
-    subtitle: 'Tell us how we can improve Buddy',
-    icon: FiMessageSquare,
-    action: 'feedback',
-  },
-  {
-    title: 'Help & Support',
-    subtitle: 'Email us or raise a support ticket',
-    icon: FiHelpCircle,
-    action: 'support',
-  },
-];
-
-export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps) => {
+export const SettingsPage = ({
+  focusSection = null,
+  onFocusHandled,
+  onNavigateHome,
+  onSignedOut,
+}: SettingsPageProps) => {
   const dispatch = useAppDispatch();
+  const { showToast } = useToast();
   const authUser = useAppSelector((state) => state.auth.user);
+  const userId = authUser?.userId || '';
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isLogoutOpen, setIsLogoutOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -173,6 +170,7 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
   const [isPlanOpen, setIsPlanOpen] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [sessionError, setSessionError] = useState('');
+  const [profileError, setProfileError] = useState('');
   const [feedbackStep, setFeedbackStep] = useState<FeedbackStep>('details');
   const [isFeedbackTopicOpen, setIsFeedbackTopicOpen] = useState(false);
   const [feedbackTopicId, setFeedbackTopicId] = useState(feedbackTopics[0].id);
@@ -191,6 +189,24 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
     phone: authUser?.phone ? String(authUser.phone) : '',
   });
   const [draftProfile, setDraftProfile] = useState(profile);
+
+  const {
+    data: profileSummary,
+    isLoading: isSummaryLoading,
+    isError: isSummaryError,
+    error: summaryError,
+    refetch: refetchSummary,
+  } = useGetProfileSummaryQuery({ userId }, { skip: !userId });
+
+  const {
+    data: planStatus,
+    isLoading: isPlanStatusLoading,
+    isError: isPlanStatusError,
+    error: planStatusError,
+    refetch: refetchPlanStatus,
+  } = useGetPlanStatusQuery({ userId }, { skip: !userId });
+
+  const [updateProfile, { isLoading: isSavingProfile }] = useUpdateProfileMutation();
   const [submitFeedback, { isLoading: isSubmittingFeedback }] = useSubmitFeedbackMutation();
   const [raiseSupportTicket, { isLoading: isRaisingTicket }] = useRaiseSupportTicketMutation();
   const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
@@ -205,17 +221,39 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
     [supportCategoryId],
   );
 
+  const currentPlanId = (planStatus?.plan?.code || planStatus?.subscription?.planCode || 'free') as PlanId;
+  const currentPlanName = planStatus?.plan?.name || 'Free';
+  const notesCount = profileSummary?.notesCount ?? 0;
+  const tasksCount = profileSummary?.tasksCount ?? 0;
+  const spacesCount = profileSummary?.spacesCount ?? 0;
+  const emailLocked = Boolean(authUser?.email);
+  const phoneLocked = Boolean(authUser?.phone);
+
   const canSubmitFeedback = feedbackMessage.trim().length >= 8 && !isSubmittingFeedback;
   const canSubmitTicket =
     supportSubject.trim().length >= 4 && supportMessage.trim().length >= 12 && !isRaisingTicket;
+  const canSaveProfile = draftProfile.name.trim().length >= 2 && !isSavingProfile;
 
   useEffect(() => {
-    setProfile({
+    if (focusSection !== 'plans') {
+      return;
+    }
+
+    setIsPlanOpen(true);
+    onFocusHandled?.();
+  }, [focusSection, onFocusHandled]);
+
+  useEffect(() => {
+    const nextProfile = {
       name: authUser?.name || 'Buddy User',
       email: authUser?.email || '',
       phone: authUser?.phone ? String(authUser.phone) : '',
-    });
-  }, [authUser?.email, authUser?.name, authUser?.phone]);
+    };
+    setProfile(nextProfile);
+    if (!isEditOpen) {
+      setDraftProfile(nextProfile);
+    }
+  }, [authUser?.email, authUser?.name, authUser?.phone, isEditOpen]);
 
   const clearLocalSession = () => {
     dispatch(setUnauthenticated());
@@ -246,22 +284,49 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
       setIsDeleteOpen(false);
       clearLocalSession();
     } catch (error) {
-      const message =
-        typeof error === 'object' && error && 'data' in error
-          ? (error as { data?: { message?: string } }).data?.message
-          : undefined;
-      setSessionError(message || 'Unable to delete account right now');
+      setSessionError(getApiErrorMessage(error, 'Unable to delete account right now'));
     }
   };
 
   const openEditProfile = () => {
+    setProfileError('');
     setDraftProfile(profile);
     setIsEditOpen(true);
   };
 
-  const saveProfile = () => {
-    setProfile(draftProfile);
-    setIsEditOpen(false);
+  const saveProfile = async () => {
+    if (!canSaveProfile) {
+      return;
+    }
+
+    setProfileError('');
+    const payload: { name?: string; email?: string; phone?: string } = {
+      name: draftProfile.name.trim(),
+    };
+
+    if (!emailLocked && draftProfile.email.trim()) {
+      payload.email = draftProfile.email.trim();
+    }
+
+    if (!phoneLocked && draftProfile.phone.trim()) {
+      payload.phone = draftProfile.phone.trim();
+    }
+
+    try {
+      const updated = await updateProfile(payload).unwrap();
+      dispatch(
+        updateAuthUser({
+          name: updated.name ?? payload.name,
+          email: updated.email ?? authUser?.email,
+          phone: updated.phone ?? authUser?.phone,
+          avatar: updated.avatar ?? authUser?.avatar,
+        }),
+      );
+      setIsEditOpen(false);
+      showToast({ message: 'Profile updated', type: 'success' });
+    } catch (error) {
+      setProfileError(getApiErrorMessage(error, 'Unable to save profile. Please try again.'));
+    }
   };
 
   const resetFeedback = () => {
@@ -325,12 +390,7 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
       }).unwrap();
       setFeedbackStep('success');
     } catch (error) {
-      const apiMessage =
-        error && typeof error === 'object' && 'data' in error
-          ? (error.data as { message?: string; data?: { message?: string } })?.message ||
-            (error.data as { data?: { message?: string } })?.data?.message
-          : '';
-      setFeedbackError(apiMessage || 'Unable to send feedback. Please try again.');
+      setFeedbackError(getApiErrorMessage(error, 'Unable to send feedback. Please try again.'));
     }
   };
 
@@ -355,14 +415,37 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
       setTicketId(response.data?.ticketId ?? 'BUDDY-' + new Date().getTime().toString().slice(-6));
       setSupportStep('success');
     } catch (error) {
-      const apiMessage =
-        error && typeof error === 'object' && 'data' in error
-          ? (error.data as { message?: string; data?: { message?: string } })?.message ||
-            (error.data as { data?: { message?: string } })?.data?.message
-          : '';
-      setSupportError(apiMessage || 'Unable to raise ticket. Please try again.');
+      setSupportError(getApiErrorMessage(error, 'Unable to raise ticket. Please try again.'));
     }
   };
+
+  const accountItems: {
+    title: string;
+    subtitle: string;
+    value?: string;
+    icon: typeof FiFileText;
+    action: AccountAction;
+  }[] = [
+    {
+      title: 'Plan',
+      subtitle: 'View and manage subscription',
+      value: isPlanStatusLoading ? '…' : currentPlanName,
+      icon: FiCreditCard,
+      action: 'plan',
+    },
+    {
+      title: 'Feedback',
+      subtitle: 'Tell us how we can improve Buddy',
+      icon: FiMessageSquare,
+      action: 'feedback',
+    },
+    {
+      title: 'Help & Support',
+      subtitle: 'Email us or raise a support ticket',
+      icon: FiHelpCircle,
+      action: 'support',
+    },
+  ];
 
   return (
     <section className="settings-page" aria-label="Settings">
@@ -383,24 +466,57 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
               </span>
             </button>
             <h2>{profile.name}</h2>
-            <p>{profile.email}</p>
-            <small>{profile.phone}</small>
-            <strong>Free plan</strong>
+            <p>{profile.email || 'No email added'}</p>
+            <small>{profile.phone || 'No phone added'}</small>
+            <strong>
+              {isPlanStatusLoading ? 'Loading plan…' : `${currentPlanName} plan`}
+            </strong>
 
-            <div className="profile-stats">
-              <span>
-                <strong>18</strong>
-                Notes
-              </span>
-              <span>
-                <strong>20</strong>
-                Tasks
-              </span>
-              <span>
-                <strong>10</strong>
-                Spaces
-              </span>
-            </div>
+            {isSummaryLoading ? (
+              <div className="settings-inline-state" aria-busy="true">
+                <span className="home-spinner" />
+                <p>Loading stats…</p>
+              </div>
+            ) : null}
+
+            {isSummaryError ? (
+              <div className="settings-inline-state settings-inline-state--error" role="alert">
+                <FiAlertCircle aria-hidden="true" size={15} />
+                <p>{getApiErrorMessage(summaryError, 'Unable to load profile stats')}</p>
+                <button type="button" className="home-retry-button" onClick={() => void refetchSummary()}>
+                  <FiRefreshCw aria-hidden="true" size={13} />
+                  Retry
+                </button>
+              </div>
+            ) : null}
+
+            {!isSummaryLoading && !isSummaryError ? (
+              <div className="profile-stats">
+                <span>
+                  <strong>{notesCount}</strong>
+                  Notes
+                </span>
+                <span>
+                  <strong>{tasksCount}</strong>
+                  Tasks
+                </span>
+                <span>
+                  <strong>{spacesCount}</strong>
+                  Spaces
+                </span>
+              </div>
+            ) : null}
+
+            {isPlanStatusError ? (
+              <div className="settings-inline-state settings-inline-state--error" role="alert">
+                <FiAlertCircle aria-hidden="true" size={15} />
+                <p>{getApiErrorMessage(planStatusError, 'Unable to load plan')}</p>
+                <button type="button" className="home-retry-button" onClick={() => void refetchPlanStatus()}>
+                  <FiRefreshCw aria-hidden="true" size={13} />
+                  Retry
+                </button>
+              </div>
+            ) : null}
           </aside>
 
           <div className="settings-sections">
@@ -415,7 +531,7 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                       className="settings-row"
                       key={item.title}
                       type="button"
-                      onClick={item.title === 'Spaces' ? onNavigateHome : undefined}
+                      onClick={() => onNavigateHome?.(item.section)}
                     >
                       <span className="settings-row__icon">
                         <Icon aria-hidden="true" size={18} />
@@ -490,7 +606,13 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
         </div>
       </div>
 
-      {isPlanOpen ? <PlanDetailsModal currentPlanId="free" onClose={() => setIsPlanOpen(false)} /> : null}
+      {isPlanOpen ? (
+        <PlanDetailsModal
+          currentPlanId={currentPlanId}
+          usage={planStatus?.usage}
+          onClose={() => setIsPlanOpen(false)}
+        />
+      ) : null}
 
       {isEditOpen ? (
         <div className="settings-modal-backdrop" role="presentation">
@@ -500,7 +622,7 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                 <h2>Edit Profile</h2>
                 <p>Keep your Buddy profile up to date.</p>
               </div>
-              <button type="button" onClick={() => setIsEditOpen(false)} aria-label="Close">
+              <button type="button" onClick={() => setIsEditOpen(false)} aria-label="Close" disabled={isSavingProfile}>
                 ×
               </button>
             </header>
@@ -509,6 +631,7 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
               <input
                 value={draftProfile.name}
                 onChange={(event) => setDraftProfile({ ...draftProfile, name: event.target.value })}
+                disabled={isSavingProfile}
               />
             </label>
             <label>
@@ -516,17 +639,27 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
               <input
                 value={draftProfile.email}
                 onChange={(event) => setDraftProfile({ ...draftProfile, email: event.target.value })}
+                disabled={isSavingProfile || emailLocked}
               />
+              {emailLocked ? <small className="settings-field-hint">Email is already linked to this account.</small> : null}
             </label>
             <label>
               Mobile number
               <input
                 value={draftProfile.phone}
                 onChange={(event) => setDraftProfile({ ...draftProfile, phone: event.target.value })}
+                disabled={isSavingProfile || phoneLocked}
               />
+              {phoneLocked ? <small className="settings-field-hint">Phone is already linked to this account.</small> : null}
             </label>
-            <button className="settings-primary-button" type="button" onClick={saveProfile}>
-              Save Changes
+            {profileError ? <p className="settings-form-error">{profileError}</p> : null}
+            <button
+              className="settings-primary-button"
+              type="button"
+              onClick={() => void saveProfile()}
+              disabled={!canSaveProfile}
+            >
+              {isSavingProfile ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -557,18 +690,19 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
               <>
                 <header>
                   <div>
-                    <h2>Help us improve</h2>
-                    <p>Select a topic and share a few details about your experience.</p>
+                    <h2>Send feedback</h2>
+                    <p>Tell us what is working well and what we should improve.</p>
                   </div>
                   <button type="button" onClick={closeFeedback} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
                   </button>
                 </header>
-                <label>
+
+                <label htmlFor="feedback-topic">
                   Topic
                   <CustomDropdown
                     id="feedback-topic"
-                    label="Select feedback topic"
+                    label="Feedback topic"
                     options={feedbackTopics}
                     value={feedbackTopicId}
                     isOpen={isFeedbackTopicOpen}
@@ -576,28 +710,28 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                     onChange={setFeedbackTopicId}
                   />
                 </label>
-                <label>
-                  Details
+
+                <label htmlFor="feedback-message">
+                  Message
                   <textarea
+                    id="feedback-message"
                     value={feedbackMessage}
                     onChange={(event) => setFeedbackMessage(event.target.value)}
-                    placeholder="Share what happened, what felt confusing, or what would make Buddy better."
-                    maxLength={1200}
+                    placeholder="Share details, steps to reproduce, or ideas…"
+                    rows={5}
                   />
                 </label>
-                <div className="settings-form-footer">
-                  <span>{feedbackMessage.trim().length}/1200</span>
-                  <span>Minimum 8 characters</span>
-                </div>
+
                 {feedbackError ? <p className="settings-form-error">{feedbackError}</p> : null}
+
                 <button
                   className="settings-primary-button"
                   type="button"
                   disabled={!canSubmitFeedback}
-                  onClick={sendFeedback}
+                  onClick={() => void sendFeedback()}
                 >
                   <FiSend aria-hidden="true" size={15} />
-                  {isSubmittingFeedback ? 'Sending...' : 'Send Feedback'}
+                  {isSubmittingFeedback ? 'Sending…' : 'Send feedback'}
                 </button>
               </>
             )}
@@ -613,40 +747,41 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                 <header>
                   <div>
                     <h2>Help & Support</h2>
-                    <p>Reach the Buddy team by email, or raise a tracked support ticket.</p>
+                    <p>Email us directly or raise a ticket for the Buddy team.</p>
                   </div>
                   <button type="button" onClick={closeSupport} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
                   </button>
                 </header>
-                <div className="settings-response-chip">
-                  <span />
-                  We typically reply within 24 hours
-                </div>
+
                 <button className="settings-support-option" type="button" onClick={openSupportEmail}>
                   <span className="settings-row__icon">
                     <FiMail aria-hidden="true" size={18} />
                   </span>
                   <span>
-                    <strong>Email us</strong>
+                    <strong>Email support</strong>
                     <small>{supportEmail}</small>
                   </span>
-                  <FiArrowRight aria-hidden="true" size={17} />
+                  <FiArrowRight aria-hidden="true" size={16} />
                 </button>
-                <button className="settings-support-option" type="button" onClick={() => setSupportStep('ticket')}>
+
+                <button
+                  className="settings-support-option"
+                  type="button"
+                  onClick={() => {
+                    resetSupportTicket();
+                    setSupportStep('ticket');
+                  }}
+                >
                   <span className="settings-row__icon">
                     <FiTag aria-hidden="true" size={18} />
                   </span>
                   <span>
                     <strong>Raise a ticket</strong>
-                    <small>Tracked support for account, billing, bugs, and app issues</small>
+                    <small>Trackable request for the Buddy team</small>
                   </span>
-                  <FiArrowRight aria-hidden="true" size={17} />
+                  <FiArrowRight aria-hidden="true" size={16} />
                 </button>
-                <p className="settings-help-note">
-                  Include your account email and what you were doing when the issue happened. It helps us resolve things
-                  faster.
-                </p>
               </>
             ) : null}
 
@@ -655,17 +790,18 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                 <header>
                   <div>
                     <h2>Raise a ticket</h2>
-                    <p>Choose a category and share enough detail for our team to investigate.</p>
+                    <p>Share the issue and we will follow up as soon as we can.</p>
                   </div>
                   <button type="button" onClick={closeSupport} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
                   </button>
                 </header>
-                <label>
+
+                <label htmlFor="support-category">
                   Category
                   <CustomDropdown
                     id="support-category"
-                    label="Select support category"
+                    label="Support category"
                     options={supportCategories}
                     value={supportCategoryId}
                     isOpen={isSupportCategoryOpen}
@@ -673,41 +809,48 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                     onChange={setSupportCategoryId}
                   />
                 </label>
-                <label>
+
+                <label htmlFor="support-subject">
                   Subject
                   <input
+                    id="support-subject"
                     value={supportSubject}
                     onChange={(event) => setSupportSubject(event.target.value)}
                     placeholder="Short summary of the issue"
-                    maxLength={120}
                   />
                 </label>
-                <label>
+
+                <label htmlFor="support-message">
                   Details
                   <textarea
+                    id="support-message"
                     value={supportMessage}
                     onChange={(event) => setSupportMessage(event.target.value)}
-                    placeholder="What happened, and what did you expect instead?"
-                    maxLength={2000}
+                    placeholder="What happened, and what should happen instead?"
+                    rows={5}
                   />
                 </label>
-                <div className="settings-form-footer">
-                  <span>{supportMessage.trim().length}/2000</span>
-                  <span>Minimum 12 characters</span>
-                </div>
+
                 {supportError ? <p className="settings-form-error">{supportError}</p> : null}
+
                 <div className="settings-modal-actions">
-                  <button className="settings-secondary-button" type="button" onClick={() => setSupportStep('hub')}>
+                  <button
+                    className="settings-secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setSupportStep('hub');
+                      resetSupportTicket();
+                    }}
+                  >
                     Back
                   </button>
                   <button
                     className="settings-primary-button"
                     type="button"
                     disabled={!canSubmitTicket}
-                    onClick={submitTicket}
+                    onClick={() => void submitTicket()}
                   >
-                    <FiSend aria-hidden="true" size={15} />
-                    {isRaisingTicket ? 'Submitting...' : 'Submit Ticket'}
+                    {isRaisingTicket ? 'Submitting…' : 'Submit ticket'}
                   </button>
                 </div>
               </>
@@ -720,17 +863,15 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
                 </div>
                 <header>
                   <div>
-                    <h2>Ticket raised</h2>
-                    <p>Thanks for reaching out. Our support team will review your request and get back to you soon.</p>
+                    <h2>Ticket submitted</h2>
+                    <p>
+                      Your request is in. Reference ID: <strong>{ticketId}</strong>
+                    </p>
                   </div>
                   <button type="button" onClick={closeSupport} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
                   </button>
                 </header>
-                <div className="settings-ticket-badge">
-                  <span>Ticket ID</span>
-                  <strong>{ticketId}</strong>
-                </div>
                 <button className="settings-primary-button" type="button" onClick={closeSupport}>
                   Done
                 </button>
@@ -741,17 +882,50 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
       ) : null}
 
       {isLogoutOpen ? (
-        <div className="settings-modal-backdrop" role="presentation">
-          <div className="settings-confirm-modal" role="dialog" aria-label="Logout">
-            <h2>Logout</h2>
-            <p>Are you sure you want to sign out of Buddy?</p>
-            {sessionError ? <p className="auth-error">{sessionError}</p> : null}
-            <div>
-              <button type="button" onClick={() => setIsLogoutOpen(false)} disabled={isLoggingOut}>
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isLoggingOut) {
+              setIsLogoutOpen(false);
+              setSessionError('');
+            }
+          }}
+        >
+          <div
+            className="settings-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-confirm-dialog__icon" aria-hidden="true">
+              <FiLogOut size={22} />
+            </div>
+            <div className="settings-confirm-dialog__content">
+              <h2 id="logout-confirm-title">Log out of Buddy?</h2>
+              <p>You can sign back in anytime with the same account. Your spaces and data stay safe.</p>
+            </div>
+            {sessionError ? <p className="settings-form-error">{sessionError}</p> : null}
+            <div className="settings-confirm-dialog__actions">
+              <button
+                className="settings-secondary-button"
+                type="button"
+                onClick={() => {
+                  setIsLogoutOpen(false);
+                  setSessionError('');
+                }}
+                disabled={isLoggingOut}
+              >
                 Cancel
               </button>
-              <button type="button" onClick={handleLogout} disabled={isLoggingOut}>
-                {isLoggingOut ? 'Signing out…' : 'Logout'}
+              <button
+                className="settings-primary-button"
+                type="button"
+                onClick={() => void handleLogout()}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? 'Logging out…' : 'Log out'}
               </button>
             </div>
           </div>
@@ -759,33 +933,72 @@ export const SettingsPage = ({ onNavigateHome, onSignedOut }: SettingsPageProps)
       ) : null}
 
       {isDeleteOpen ? (
-        <div className="settings-modal-backdrop" role="presentation">
-          <div className="settings-modal settings-delete-modal" role="dialog" aria-label="Delete account">
-            <header>
-              <div>
-                <h2>Delete Account</h2>
-                <p>This action cannot be undone.</p>
-              </div>
-              <button type="button" onClick={() => setIsDeleteOpen(false)} aria-label="Close">
-                ×
-              </button>
-            </header>
-            <div className="settings-warning-box">
-              This will erase your account, spaces, notes, and tasks from our servers.
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isDeletingAccount) {
+              setIsDeleteOpen(false);
+              setDeleteText('');
+              setSessionError('');
+            }
+          }}
+        >
+          <div
+            className="settings-confirm-dialog settings-confirm-dialog--danger"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-confirm-dialog__icon settings-confirm-dialog__icon--danger" aria-hidden="true">
+              <FiTrash2 size={22} />
             </div>
-            <label>
-              Type DELETE to confirm
-              <input value={deleteText} onChange={(event) => setDeleteText(event.target.value.toUpperCase())} />
+            <div className="settings-confirm-dialog__content">
+              <h2 id="delete-confirm-title">Delete your account?</h2>
+              <p>
+                This permanently removes your spaces, notes, tasks, and recordings. This action cannot be undone.
+              </p>
+            </div>
+            <div className="settings-confirm-dialog__warning">
+              <strong>Before you continue</strong>
+              <span>Type <em>DELETE</em> below to confirm you understand this is permanent.</span>
+            </div>
+            <label className="settings-confirm-dialog__field" htmlFor="delete-confirm">
+              Confirmation
+              <input
+                id="delete-confirm"
+                value={deleteText}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Type DELETE"
+                onChange={(event) => setDeleteText(event.target.value)}
+                disabled={isDeletingAccount}
+              />
             </label>
-            {sessionError ? <p className="auth-error">{sessionError}</p> : null}
-            <button
-              className="settings-danger-button"
-              type="button"
-              disabled={deleteText !== 'DELETE' || isDeletingAccount}
-              onClick={handleDeleteAccount}
-            >
-              {isDeletingAccount ? 'Deleting…' : 'Delete my account'}
-            </button>
+            {sessionError ? <p className="settings-form-error">{sessionError}</p> : null}
+            <div className="settings-confirm-dialog__actions">
+              <button
+                className="settings-secondary-button"
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={() => {
+                  setIsDeleteOpen(false);
+                  setDeleteText('');
+                  setSessionError('');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="settings-primary-button settings-primary-button--danger"
+                type="button"
+                disabled={deleteText !== 'DELETE' || isDeletingAccount}
+                onClick={() => void handleDeleteAccount()}
+              >
+                {isDeletingAccount ? 'Deleting…' : 'Delete account'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

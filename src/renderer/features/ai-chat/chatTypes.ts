@@ -44,7 +44,8 @@ export type ChatSession = {
   title: string;
   spaceId: string | null;
   messageCount: number;
-  updatedAt: Date;
+  /** ISO timestamp — keep serializable for Redux. */
+  updatedAt: string;
 };
 
 export type ChatThreadMessage = {

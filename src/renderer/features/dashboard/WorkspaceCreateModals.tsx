@@ -13,6 +13,9 @@ type CreateSpaceModalProps = {
   onClose: () => void;
   onCreate: (payload: { name: string; description: string }) => void | Promise<void>;
   isSubmitting?: boolean;
+  mode?: 'create' | 'edit';
+  initialName?: string;
+  initialDescription?: string;
 };
 
 type CreateTaskModalProps = {
@@ -25,6 +28,11 @@ type CreateTaskModalProps = {
     priority: TaskPriority;
   }) => void | Promise<void>;
   isSubmitting?: boolean;
+  mode?: 'create' | 'edit';
+  initialTitle?: string;
+  initialDescription?: string;
+  initialDueDate?: string | null;
+  initialPriority?: TaskPriority;
 };
 
 type CreateNoteModalProps = {
@@ -32,6 +40,18 @@ type CreateNoteModalProps = {
   onClose: () => void;
   onCreate: (payload: { title: string; description: string }) => void | Promise<void>;
   isSubmitting?: boolean;
+  mode?: 'create' | 'edit';
+  initialTitle?: string;
+  initialDescription?: string;
+};
+
+type ConfirmDeleteModalProps = {
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  isSubmitting?: boolean;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
 };
 
 type DuePreset = 'today' | 'tomorrow' | 'this_week' | 'next_week' | 'custom';
@@ -86,9 +106,17 @@ const dueOptions = [
   { id: 'custom', label: 'Custom date', description: 'Pick an exact due date' },
 ];
 
-export const CreateSpaceModal = ({ onClose, onCreate, isSubmitting = false }: CreateSpaceModalProps) => {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+export const CreateSpaceModal = ({
+  onClose,
+  onCreate,
+  isSubmitting = false,
+  mode = 'create',
+  initialName = '',
+  initialDescription = '',
+}: CreateSpaceModalProps) => {
+  const isEdit = mode === 'edit';
+  const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(initialDescription);
   const [error, setError] = useState('');
 
   const handleSubmit = () => {
@@ -127,14 +155,18 @@ export const CreateSpaceModal = ({ onClose, onCreate, isSubmitting = false }: Cr
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
-        aria-label="Create space"
+        aria-label={isEdit ? 'Edit space' : 'Create space'}
         aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
           <div>
-            <h2>Create New Space</h2>
-            <p>Give your space a name to organize tasks and notes.</p>
+            <h2>{isEdit ? 'Edit space' : 'Create New Space'}</h2>
+            <p>
+              {isEdit
+                ? 'Update the name or description for this space.'
+                : 'Give your space a name to organize tasks and notes.'}
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
             <FiX aria-hidden="true" size={18} />
@@ -183,7 +215,7 @@ export const CreateSpaceModal = ({ onClose, onCreate, isSubmitting = false }: Cr
             onClick={handleSubmit}
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Creating…' : 'Create Space'}
+            {isSubmitting ? (isEdit ? 'Saving…' : 'Creating…') : isEdit ? 'Save changes' : 'Create Space'}
           </button>
         </div>
       </div>
@@ -196,12 +228,20 @@ export const CreateTaskModal = ({
   onClose,
   onCreate,
   isSubmitting = false,
+  mode = 'create',
+  initialTitle = '',
+  initialDescription = '',
+  initialDueDate = null,
+  initialPriority = 'Medium',
 }: CreateTaskModalProps) => {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [duePreset, setDuePreset] = useState<DuePreset>('today');
-  const [customDueDate, setCustomDueDate] = useState(() => toDateInputValue(new Date()));
-  const [priority, setPriority] = useState<TaskPriority>('Medium');
+  const isEdit = mode === 'edit';
+  const [title, setTitle] = useState(initialTitle);
+  const [description, setDescription] = useState(initialDescription);
+  const [duePreset, setDuePreset] = useState<DuePreset>(initialDueDate ? 'custom' : 'today');
+  const [customDueDate, setCustomDueDate] = useState(
+    () => initialDueDate || toDateInputValue(new Date()),
+  );
+  const [priority, setPriority] = useState<TaskPriority>(initialPriority);
   const [isDueOpen, setIsDueOpen] = useState(false);
   const [isPriorityOpen, setIsPriorityOpen] = useState(false);
   const [error, setError] = useState('');
@@ -250,13 +290,13 @@ export const CreateTaskModal = ({
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
-        aria-label="Create task"
+        aria-label={isEdit ? 'Edit task' : 'Create task'}
         aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
           <div>
-            <h2>New task</h2>
+            <h2>{isEdit ? 'Edit task' : 'New task'}</h2>
             <p>
               {spaceName} · {todayLabel()}
             </p>
@@ -275,9 +315,7 @@ export const CreateTaskModal = ({
             setError('');
           }}
           placeholder="Task title"
-          maxLength={80}
           autoFocus
-          hint="Title max 80 characters"
           disabled={isSubmitting}
         />
 
@@ -289,8 +327,6 @@ export const CreateTaskModal = ({
             setError('');
           }}
           placeholder="Write a short description..."
-          maxLength={500}
-          hint={`${description.trim().length}/500`}
           disabled={isSubmitting}
         />
 
@@ -366,7 +402,7 @@ export const CreateTaskModal = ({
             onClick={handleSubmit}
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Saving…' : 'Save task'}
+            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save task'}
           </button>
         </div>
       </div>
@@ -379,9 +415,13 @@ export const CreateNoteModal = ({
   onClose,
   onCreate,
   isSubmitting = false,
+  mode = 'create',
+  initialTitle = '',
+  initialDescription = '',
 }: CreateNoteModalProps) => {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const isEdit = mode === 'edit';
+  const [title, setTitle] = useState(initialTitle);
+  const [description, setDescription] = useState(initialDescription);
   const [error, setError] = useState('');
 
   const handleSubmit = () => {
@@ -421,13 +461,13 @@ export const CreateNoteModal = ({
       <div
         className="settings-modal settings-action-modal home-create-modal"
         role="dialog"
-        aria-label="Create note"
+        aria-label={isEdit ? 'Edit note' : 'Create note'}
         aria-busy={isSubmitting}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
           <div>
-            <h2>New note</h2>
+            <h2>{isEdit ? 'Edit note' : 'New note'}</h2>
             <p>
               {spaceName} · {todayLabel()}
             </p>
@@ -446,9 +486,7 @@ export const CreateNoteModal = ({
             setError('');
           }}
           placeholder="Note title"
-          maxLength={80}
           autoFocus
-          hint="Title max 80 characters"
           disabled={isSubmitting}
         />
 
@@ -460,8 +498,6 @@ export const CreateNoteModal = ({
             setError('');
           }}
           placeholder="Write a short description..."
-          maxLength={500}
-          hint={`${description.trim().length}/500`}
           disabled={isSubmitting}
         />
 
@@ -482,10 +518,66 @@ export const CreateNoteModal = ({
             onClick={handleSubmit}
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Saving…' : 'Save note'}
+            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save note'}
           </button>
         </div>
       </div>
     </div>
   );
 };
+
+export const ConfirmDeleteModal = ({
+  title,
+  description,
+  confirmLabel = 'Delete',
+  isSubmitting = false,
+  onClose,
+  onConfirm,
+}: ConfirmDeleteModalProps) => (
+  <div
+    className="settings-modal-backdrop"
+    role="presentation"
+    onClick={() => {
+      if (!isSubmitting) {
+        onClose();
+      }
+    }}
+  >
+    <div
+      className="settings-modal settings-action-modal home-create-modal"
+      role="dialog"
+      aria-label={title}
+      aria-busy={isSubmitting}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <header>
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
+          <FiX aria-hidden="true" size={18} />
+        </button>
+      </header>
+
+      <div className="settings-modal-actions">
+        <button
+          className="settings-secondary-button"
+          type="button"
+          onClick={onClose}
+          disabled={isSubmitting}
+        >
+          Cancel
+        </button>
+        <button
+          className="settings-primary-button settings-primary-button--danger"
+          type="button"
+          onClick={() => void onConfirm()}
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? 'Deleting…' : confirmLabel}
+        </button>
+      </div>
+    </div>
+  </div>
+);

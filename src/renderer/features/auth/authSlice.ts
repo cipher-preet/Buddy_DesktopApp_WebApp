@@ -19,9 +19,9 @@ type AuthState = {
 
 const storedSession = readAuthSession();
 
-// Keep the local session across reloads. Server validation happens in the background.
+// Validate stored sessions on startup before showing the main app.
 const initialState: AuthState = {
-  status: storedSession ? 'authenticated' : 'unauthenticated',
+  status: storedSession ? 'bootstrapping' : 'unauthenticated',
   token: storedSession?.token ?? null,
   user: storedSession?.user ?? null,
   authenticatedAt: storedSession?.authenticatedAt ?? null,
@@ -66,6 +66,9 @@ const authSlice = createSlice({
       state.user = null;
       state.authenticatedAt = null;
     },
+    completeBootstrap(state) {
+      state.status = state.token && state.user ? 'authenticated' : 'unauthenticated';
+    },
     updateAuthUser(state, action: PayloadAction<Partial<AuthUser>>) {
       if (!state.user || !state.token) {
         return;
@@ -91,6 +94,7 @@ export const {
   setAuthenticatedFromCheck,
   hydrateFromStorage,
   setUnauthenticated,
+  completeBootstrap,
   updateAuthUser,
 } = authSlice.actions;
 

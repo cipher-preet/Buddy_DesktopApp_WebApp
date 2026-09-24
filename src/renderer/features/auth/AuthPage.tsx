@@ -329,7 +329,7 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
             <div className="testimonial-person">
               <div>
                 <strong>Preet</strong>
-                <span>CEO &amp; Founder</span>
+                <span>Founder</span>
               </div>
             </div>
 

@@ -8,6 +8,7 @@ import {
 
 import { setUnauthenticated } from '@/features/auth/authSlice';
 import { getStoredAuthToken } from '@/features/auth/authStorage';
+import { isHardAuthFailure } from '@/services/apiErrors';
 import type {
   AuthApiEnvelope,
   AuthPayload,
@@ -81,6 +82,20 @@ export type DeleteAccountRequest = {
   confirmation: 'DELETE';
 };
 
+export type UpdateProfileRequest = {
+  name?: string;
+  email?: string;
+  phone?: string;
+};
+
+export type UpdateProfileResponse = {
+  userId: string;
+  phone?: string | number | null;
+  email?: string | null;
+  name?: string | null;
+  avatar?: string | null;
+};
+
 const rawBaseQuery = fetchBaseQuery({
   baseUrl,
   credentials: 'include',
@@ -104,6 +119,39 @@ const isPublicAuthRequest = (args: string | FetchArgs) => {
   return PUBLIC_AUTH_PATHS.some((path) => url === path || url.startsWith(`${path}?`));
 };
 
+const hasActiveSession = (getState: () => unknown) => {
+  const state = getState() as { auth?: { token?: string | null; status?: string } };
+  return Boolean(state.auth?.token || getStoredAuthToken());
+};
+
+const isAuthBootstrapping = (getState: () => unknown) => {
+  const state = getState() as { auth?: { status?: string } };
+  return state.auth?.status === 'bootstrapping';
+};
+
+let clearAuthenticatedSession: ((dispatch: (action: unknown) => void) => void) | null = null;
+let logoutInFlight = false;
+
+const forceLogout = (dispatch: (action: unknown) => void) => {
+  if (logoutInFlight) {
+    return;
+  }
+  logoutInFlight = true;
+
+  try {
+    if (clearAuthenticatedSession) {
+      clearAuthenticatedSession(dispatch);
+      return;
+    }
+
+    dispatch(setUnauthenticated());
+  } finally {
+    window.setTimeout(() => {
+      logoutInFlight = false;
+    }, 0);
+  }
+};
+
 const baseQueryWithAuth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
   args,
   api,
@@ -111,15 +159,21 @@ const baseQueryWithAuth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQuery
 ) => {
   const result = await rawBaseQuery(args, api, extraOptions);
   const requestUrl = typeof args === 'string' ? args : args.url;
+  const isPublicRequest = isPublicAuthRequest(args);
 
-  // Don't wipe the local session on checkauth failures here — App.tsx decides
-  // whether a 401 should logout. Still logout on 401 for other protected APIs.
+  // Never clear session during bootstrap — App owns checkauth decisions.
+  if (!hasActiveSession(api.getState) || isPublicRequest || isAuthBootstrapping(api.getState)) {
+    return result;
+  }
+
+  // Only definitive auth failures (401 / clear auth 403) end the session.
+  // Network blips and 5xx must not log the user out on refresh.
   if (
-    result.error?.status === 401 &&
-    !isPublicAuthRequest(args) &&
+    result.error &&
+    isHardAuthFailure(result.error) &&
     requestUrl !== 'auth/checkauth'
   ) {
-    api.dispatch(setUnauthenticated());
+    forceLogout(api.dispatch);
   }
 
   return result;
@@ -139,12 +193,15 @@ export const api = createApi({
   tagTypes: [
     'Health',
     'Auth',
+    'Profile',
+    'Plans',
     'Spaces',
     'SpaceTasks',
     'SpaceNotes',
     'ChatSessions',
     'ChatMessages',
     'CalendarFeed',
+    'Meetings',
   ],
   endpoints: (builder) => ({
     getHealth: builder.query<HealthResponse, void>({
@@ -202,6 +259,16 @@ export const api = createApi({
         unwrapAuthData(response, 'Session is not active'),
       providesTags: ['Auth'],
     }),
+    updateProfile: builder.mutation<UpdateProfileResponse, UpdateProfileRequest>({
+      query: (body) => ({
+        url: 'auth/me',
+        method: 'PATCH',
+        body,
+      }),
+      transformResponse: (response: AuthApiEnvelope<UpdateProfileResponse>) =>
+        unwrapAuthData(response, 'Unable to update profile'),
+      invalidatesTags: ['Auth', 'Profile'],
+    }),
     logout: builder.mutation<LogoutData, void>({
       query: () => ({
         url: 'auth/logout',
@@ -219,7 +286,7 @@ export const api = createApi({
       }),
       transformResponse: (response: AuthApiEnvelope<{ message?: string }>) =>
         unwrapAuthData(response, 'Unable to delete account'),
-      invalidatesTags: ['Auth'],
+      invalidatesTags: ['Auth', 'Profile', 'Plans'],
     }),
     submitFeedback: builder.mutation<SubmitFeedbackResponse, SubmitFeedbackRequest>({
       query: (body) => ({
@@ -238,6 +305,11 @@ export const api = createApi({
   }),
 });
 
+clearAuthenticatedSession = (dispatch) => {
+  dispatch(setUnauthenticated());
+  dispatch(api.util.resetApiState());
+};
+
 export const {
   useGetHealthQuery,
   useSendOtpMutation,
@@ -245,6 +317,7 @@ export const {
   useVerifyOtpMutation,
   useGoogleLoginMutation,
   useLazyCheckAuthQuery,
+  useUpdateProfileMutation,
   useLogoutMutation,
   useDeleteAccountMutation,
   useRaiseSupportTicketMutation,

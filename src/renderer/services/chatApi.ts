@@ -1,5 +1,6 @@
 import { api } from '@/services/api';
 import { mapChatMessage, mapChatSession } from '@/features/ai-chat/chatUtils';
+import { getStoredAuthToken } from '@/features/auth/authStorage';
 import type {
   AskChatDto,
   ChatApiEnvelope,
@@ -98,23 +99,38 @@ export const chatApi = api.injectEndpoints({
     }),
     askBuddy: builder.mutation<
       AskChatDto,
-      { userId: string; question: string; chatId?: string | null; spaceId?: string | null }
+      {
+        userId: string;
+        question: string;
+        chatId?: string | null;
+        spaceId?: string | null;
+        spaceIds?: string[];
+      }
     >({
-      query: ({ userId, question, chatId, spaceId }) => ({
-        url: 'chat/ask',
-        method: 'POST',
-        body: {
-          userId,
-          question,
-          ...(chatId ? { chatId } : {}),
-          ...(spaceId ? { spaceId } : {}),
-        },
-      }),
+      query: ({ userId, question, chatId, spaceId, spaceIds }) => {
+        const authToken = getStoredAuthToken();
+        return {
+          url: 'chat/ask',
+          method: 'POST',
+          body: {
+            userId,
+            question,
+            ...(chatId ? { chatId } : {}),
+            ...(spaceId ? { spaceId } : {}),
+            ...(spaceIds && spaceIds.length > 0 ? { spaceIds } : {}),
+            ...(authToken ? { authToken } : {}),
+          },
+        };
+      },
       transformResponse: (response: ChatApiEnvelope<AskChatDto>) =>
         unwrapChatData(response, 'Buddy could not answer that question'),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'ChatSessions', id: 'LIST' },
         ...(arg.chatId ? [{ type: 'ChatMessages' as const, id: arg.chatId }] : []),
+        // Refresh home data after chat may have created tasks/notes/spaces.
+        'Spaces',
+        'Profile',
+        { type: 'CalendarFeed', id: 'LIST' },
       ],
     }),
   }),

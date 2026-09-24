@@ -39,6 +39,12 @@ export type MappedNotesPage = {
   nextCursor: string | null;
 };
 
+export type ProfileSummary = {
+  notesCount: number;
+  tasksCount: number;
+  spacesCount: number;
+};
+
 const unwrapHomeData = <T,>(response: HomeApiEnvelope<T>, fallbackMessage: string): T => {
   if (!response?.success || response.data === undefined) {
     throw new Error(response?.message || fallbackMessage);
@@ -155,11 +161,40 @@ export const homeApi = api.injectEndpoints({
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to create space'),
-      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }],
+      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Profile'],
+    }),
+    startListening: builder.mutation<
+      {
+        message?: string;
+        isListning?: boolean;
+        listeningStartedAt?: string | null;
+      },
+      { spaceId: string; isListning: boolean }
+    >({
+      query: (body) => ({
+        url: 'home/startListning',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (
+        response: HomeApiEnvelope<{
+          message?: string;
+          isListning?: boolean;
+          listeningStartedAt?: string | null;
+          status?: number;
+        }>,
+      ) => unwrapHomeData(response, 'Unable to update listening state'),
+      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Plans'],
     }),
     createStagedTask: builder.mutation<
       { message?: string },
-      { spaceId: string; title: string; description: string; date?: string }
+      {
+        spaceId: string;
+        title: string;
+        description: string;
+        date?: string;
+        priority?: 'High' | 'Medium' | 'Low';
+      }
     >({
       query: (body) => ({
         url: 'home/create-staged-task',
@@ -171,6 +206,7 @@ export const homeApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, arg) => [
         { type: 'SpaceTasks', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
+        'Profile',
       ],
     }),
     createStagedNote: builder.mutation<
@@ -184,7 +220,163 @@ export const homeApi = api.injectEndpoints({
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to create note'),
-      invalidatesTags: (_result, _error, arg) => [{ type: 'SpaceNotes', id: arg.spaceId }],
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceNotes', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    updateSpace: builder.mutation<
+      { message?: string },
+      { spaceId: string; spacename?: string; description?: string }
+    >({
+      query: (body) => ({
+        url: 'home/update-space',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
+        unwrapHomeData(response, 'Unable to update space'),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'Spaces', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    updateStagedTask: builder.mutation<
+      { message?: string },
+      {
+        taskId: string;
+        spaceId: string;
+        title?: string;
+        description?: string;
+        date?: string;
+        priority?: 'High' | 'Medium' | 'Low';
+      }
+    >({
+      query: ({ spaceId: _spaceId, ...body }) => ({
+        url: 'home/update-staged-task',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
+        unwrapHomeData(response, 'Unable to update task'),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceTasks', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    updateStagedNote: builder.mutation<
+      { message?: string },
+      {
+        noteId: string;
+        spaceId: string;
+        title?: string;
+        description?: string;
+        date?: string;
+      }
+    >({
+      query: ({ spaceId: _spaceId, ...body }) => ({
+        url: 'home/update-staged-note',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
+        unwrapHomeData(response, 'Unable to update note'),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceNotes', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    deleteSpace: builder.mutation<{ message?: string }, { spaceId: string }>({
+      query: (body) => ({
+        url: 'home/delete-space',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
+        const data = unwrapHomeData(response, 'Unable to delete space');
+        if (data && typeof data === 'object' && 'message' in data) {
+          return { message: (data as { message?: string }).message };
+        }
+        return { message: 'Space deleted successfully.' };
+      },
+      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Profile', 'SpaceTasks', 'SpaceNotes'],
+    }),
+    deleteStagedTask: builder.mutation<
+      { message?: string },
+      { taskId: string; spaceId: string }
+    >({
+      query: ({ spaceId: _spaceId, taskId }) => ({
+        url: 'home/delete-staged-task',
+        method: 'POST',
+        body: { taskId },
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
+        const data = unwrapHomeData(response, 'Unable to delete task');
+        if (data && typeof data === 'object' && 'message' in data) {
+          return { message: (data as { message?: string }).message };
+        }
+        return { message: 'Task deleted successfully.' };
+      },
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceTasks', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    deleteStagedNote: builder.mutation<
+      { message?: string },
+      { noteId: string; spaceId: string }
+    >({
+      query: ({ spaceId: _spaceId, noteId }) => ({
+        url: 'home/delete-staged-note',
+        method: 'POST',
+        body: { noteId },
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
+        const data = unwrapHomeData(response, 'Unable to delete note');
+        if (data && typeof data === 'object' && 'message' in data) {
+          return { message: (data as { message?: string }).message };
+        }
+        return { message: 'Note deleted successfully.' };
+      },
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceNotes', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    setStagedTaskStatus: builder.mutation<
+      { message?: string },
+      { taskId: string; spaceId: string; done: boolean }
+    >({
+      query: ({ spaceId: _spaceId, taskId, done }) => ({
+        url: 'home/set-staged-task-status',
+        method: 'POST',
+        body: { taskId, done },
+      }),
+      transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
+        unwrapHomeData(response, 'Unable to update task status'),
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'SpaceTasks', id: arg.spaceId },
+        { type: 'Spaces', id: 'LIST' },
+        'Profile',
+      ],
+    }),
+    getProfileSummary: builder.query<
+      ProfileSummary,
+      { userId: string }
+    >({
+      query: ({ userId }) => ({
+        url: 'home/getProfileSummary',
+        params: { userId },
+      }),
+      transformResponse: (response: HomeApiEnvelope<ProfileSummary>) =>
+        unwrapHomeData(response, 'Unable to load profile summary'),
+      providesTags: ['Profile'],
     }),
   }),
   overrideExisting: false,
@@ -195,6 +387,15 @@ export const {
   useGetSpaceTasksInfiniteQuery,
   useGetSpaceNotesInfiniteQuery,
   useCreateSpaceMutation,
+  useStartListeningMutation,
   useCreateStagedTaskMutation,
   useCreateStagedNoteMutation,
+  useUpdateSpaceMutation,
+  useUpdateStagedTaskMutation,
+  useUpdateStagedNoteMutation,
+  useDeleteSpaceMutation,
+  useDeleteStagedTaskMutation,
+  useDeleteStagedNoteMutation,
+  useSetStagedTaskStatusMutation,
+  useGetProfileSummaryQuery,
 } = homeApi;
