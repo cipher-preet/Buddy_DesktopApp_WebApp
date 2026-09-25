@@ -32,6 +32,7 @@ export type CursorPageParam = string | null;
 
 export type MeetingsQueryArg = {
   limit?: number;
+  spaceId?: string | null;
 };
 
 export type MappedMeetingsPage = {
@@ -53,6 +54,25 @@ export type MappedMeetingTasks = {
 export type MappedMeetingNotes = {
   meetingSessionId: string;
   items: MeetingNoteView[];
+};
+
+export type AssignMeetingSpaceResult = {
+  meetingSessionId: string;
+  spaceId: string | null;
+  spaceName: string | null;
+  unchanged: boolean;
+};
+
+export type ApiAssignMeetingSpace = {
+  meetingSessionId: string;
+  spaceId: string | null;
+  spaceName: string | null;
+  unchanged?: boolean;
+  updated?: {
+    conversation?: boolean;
+    notes?: number;
+    tasks?: number;
+  };
 };
 
 const DEFAULT_MEETINGS_LIMIT = 24;
@@ -82,6 +102,7 @@ export const meetingsApi = api.injectEndpoints({
         params: {
           limit: queryArg.limit ?? DEFAULT_MEETINGS_LIMIT,
           ...(pageParam ? { cursor: pageParam } : {}),
+          ...(queryArg.spaceId ? { spaceId: queryArg.spaceId } : {}),
         },
       }),
       transformResponse: (response: MeetingApiEnvelope<ApiMeetingsPage>) => {
@@ -94,15 +115,21 @@ export const meetingsApi = api.injectEndpoints({
         };
       },
       keepUnusedDataFor: 30,
-      providesTags: (result) =>
-        result
+      providesTags: (result, _error, arg) => {
+        const listId = arg.spaceId ? `LIST:${arg.spaceId}` : 'LIST';
+        return result
           ? [
               ...result.pages.flatMap((page) =>
                 page.meetings.map((meeting) => ({ type: 'Meetings' as const, id: meeting.id })),
               ),
+              { type: 'Meetings', id: listId },
               { type: 'Meetings', id: 'LIST' },
             ]
-          : [{ type: 'Meetings', id: 'LIST' }],
+          : [
+              { type: 'Meetings', id: listId },
+              { type: 'Meetings', id: 'LIST' },
+            ];
+      },
     }),
 
     getMeeting: builder.query<MeetingDetailShell, string>({
@@ -162,6 +189,74 @@ export const meetingsApi = api.injectEndpoints({
         mapMeetingPlayback(unwrapMeetingData(response, 'Unable to load playback')),
       providesTags: (_result, _error, sessionId) => [{ type: 'Meetings', id: `${sessionId}:playback` }],
     }),
+
+    assignMeetingSpace: builder.mutation<
+      AssignMeetingSpaceResult,
+      { sessionId: string; spaceId: string | null; previousSpaceId?: string | null }
+    >({
+      query: ({ sessionId, spaceId }) => ({
+        url: `meeting-recordings/${encodeURIComponent(sessionId)}/space`,
+        method: 'PATCH',
+        body: { spaceId },
+      }),
+      transformResponse: (response: MeetingApiEnvelope<ApiAssignMeetingSpace>) => {
+        const payload = unwrapMeetingData(response, 'Unable to update meeting space');
+        return {
+          meetingSessionId: String(payload.meetingSessionId || ''),
+          spaceId: payload.spaceId ? String(payload.spaceId) : null,
+          spaceName: payload.spaceName ? String(payload.spaceName) : null,
+          unchanged: Boolean(payload.unchanged),
+        };
+      },
+      async onQueryStarted({ sessionId, spaceId, previousSpaceId }, { dispatch, queryFulfilled, getState }) {
+        const cachedArgs = meetingsApi.util.selectCachedArgsForQuery(getState(), 'getMeetings');
+        const patches = cachedArgs.map((queryArg) =>
+          dispatch(
+            meetingsApi.util.updateQueryData('getMeetings', queryArg, (draft) => {
+              for (const page of draft.pages) {
+                const index = page.meetings.findIndex((meeting) => meeting.id === sessionId);
+                if (index < 0) {
+                  continue;
+                }
+
+                const filterSpaceId = queryArg.spaceId || null;
+                if (filterSpaceId && spaceId !== filterSpaceId) {
+                  page.meetings.splice(index, 1);
+                  continue;
+                }
+
+                page.meetings[index].spaceId = spaceId;
+              }
+            }),
+          ),
+        );
+
+        try {
+          await queryFulfilled;
+        } catch {
+          for (const patch of patches) {
+            patch.undo();
+          }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => {
+        const tags: Array<{ type: 'Meetings' | 'SpaceNotes' | 'SpaceTasks'; id: string }> = [
+          { type: 'Meetings', id: 'LIST' },
+          { type: 'Meetings', id: arg.sessionId },
+        ];
+        if (arg.spaceId) {
+          tags.push({ type: 'Meetings', id: `LIST:${arg.spaceId}` });
+          tags.push({ type: 'SpaceNotes', id: arg.spaceId });
+          tags.push({ type: 'SpaceTasks', id: arg.spaceId });
+        }
+        if (arg.previousSpaceId && arg.previousSpaceId !== arg.spaceId) {
+          tags.push({ type: 'Meetings', id: `LIST:${arg.previousSpaceId}` });
+          tags.push({ type: 'SpaceNotes', id: arg.previousSpaceId });
+          tags.push({ type: 'SpaceTasks', id: arg.previousSpaceId });
+        }
+        return tags;
+      },
+    }),
   }),
   overrideExisting: false,
 });
@@ -174,4 +269,5 @@ export const {
   useGetMeetingTasksQuery,
   useGetMeetingNotesQuery,
   useGetMeetingPlaybackQuery,
+  useAssignMeetingSpaceMutation,
 } = meetingsApi;

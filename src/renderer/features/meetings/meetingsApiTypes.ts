@@ -58,6 +58,7 @@ export type ApiMeetingDetail = ApiMeetingListItem & {
 export type ApiMeetingsPage = {
   items: ApiMeetingListItem[];
   nextCursor: string | null;
+  spaceId?: string | null;
 };
 
 export type ApiTranscriptSegment = {

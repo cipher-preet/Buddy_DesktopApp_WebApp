@@ -662,7 +662,12 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
         ) : (
           <>
             <div className="space-detail__toolbar">
-              <div className="space-switch" role="tablist" aria-label="Space content">
+              <div
+                className={`space-switch${activeSection === 'notes' ? ' is-notes' : ' is-tasks'}`}
+                role="tablist"
+                aria-label="Space content"
+              >
+                <span className="space-switch__thumb" aria-hidden="true" />
                 <button
                   className="space-switch__button"
                   data-active={activeSection === 'tasks' ? 'true' : undefined}

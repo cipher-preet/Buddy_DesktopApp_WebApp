@@ -12,12 +12,13 @@ import {
   FiRefreshCw,
   FiSearch,
   FiVideo,
+  FiX,
 } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
-import { useGetMeetingsInfiniteQuery } from '@/services/meetingsApi';
+import { useAssignMeetingSpaceMutation, useGetMeetingsInfiniteQuery } from '@/services/meetingsApi';
 
 import { MeetingDetailView } from './MeetingDetailView';
 import type { MeetingListItem } from './meetingsApiTypes';
@@ -84,6 +85,8 @@ type MeetingSpaceMenuProps = {
   isOpen: boolean;
   spaces: WorkspaceSpace[];
   selectedSpaceIds: string[];
+  pendingSpaceId: string | null;
+  assignError: string | null;
   isSpacesLoading: boolean;
   isSpacesError: boolean;
   spacesErrorMessage: string;
@@ -102,6 +105,8 @@ const MeetingSpaceMenu = ({
   isOpen,
   spaces,
   selectedSpaceIds,
+  pendingSpaceId,
+  assignError,
   isSpacesLoading,
   isSpacesError,
   spacesErrorMessage,
@@ -117,6 +122,7 @@ const MeetingSpaceMenu = ({
   const searchRef = useRef<HTMLInputElement>(null);
   const onCloseRef = useRef(onClose);
   const [query, setQuery] = useState('');
+  const isAssigning = Boolean(pendingSpaceId);
 
   onCloseRef.current = onClose;
 
@@ -195,6 +201,13 @@ const MeetingSpaceMenu = ({
             <span>{selectedSpaceIds.length > 0 ? '1 selected' : 'None selected'}</span>
           </div>
 
+          {assignError ? (
+            <div className="meeting-space-popover__error" role="alert">
+              <FiAlertCircle aria-hidden="true" size={14} />
+              <p>{assignError}</p>
+            </div>
+          ) : null}
+
           <label className="meeting-space-popover__search">
             <FiSearch aria-hidden="true" size={15} />
             <input
@@ -203,6 +216,7 @@ const MeetingSpaceMenu = ({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search spaces"
               aria-label="Search spaces"
+              disabled={isAssigning}
             />
           </label>
 
@@ -234,23 +248,38 @@ const MeetingSpaceMenu = ({
 
             {filteredSpaces.map((space) => {
               const checked = selectedSpaceIds.includes(space.id);
+              const isPending = pendingSpaceId === space.id;
               const inputId = `meeting-${meetingId}-space-${space.id}`;
 
               return (
-                <label key={space.id} className="meeting-space-option" htmlFor={inputId}>
+                <label
+                  key={space.id}
+                  className={`meeting-space-option${isPending ? ' is-loading' : ''}${
+                    isAssigning && !isPending ? ' is-disabled' : ''
+                  }`}
+                  htmlFor={inputId}
+                  aria-busy={isPending}
+                >
                   <input
                     id={inputId}
                     type="checkbox"
                     checked={checked}
+                    disabled={isAssigning}
                     onChange={() => onToggleSpace(space.id)}
                   />
-                  <span className="meeting-space-option__check" aria-hidden="true" />
+                  <span className="meeting-space-option__check" aria-hidden="true">
+                    {isPending ? <span className="meeting-space-option__spinner" /> : null}
+                  </span>
                   <span className="meeting-space-option__icon" aria-hidden="true">
                     <FiFolder size={14} />
                   </span>
                   <span className="meeting-space-option__text">
                     <strong>{space.name}</strong>
-                    <small>{space.description || 'No description'}</small>
+                    <small>
+                      {isPending
+                        ? 'Updating…'
+                        : space.description || 'No description'}
+                    </small>
                   </span>
                 </label>
               );
@@ -260,7 +289,7 @@ const MeetingSpaceMenu = ({
               <button
                 type="button"
                 className="meeting-space-popover__more"
-                disabled={isFetchingMoreSpaces}
+                disabled={isFetchingMoreSpaces || isAssigning}
                 onClick={onLoadMoreSpaces}
               >
                 {isFetchingMoreSpaces ? 'Loading…' : 'Load more spaces'}
@@ -278,12 +307,23 @@ export const MeetingsPage = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menuMeetingId, setMenuMeetingId] = useState<string | null>(null);
+  const [filterSpaceId, setFilterSpaceId] = useState<string | null>(null);
   const [meetingSpaceIds, setMeetingSpaceIds] = useState<Record<string, string[]>>({});
+  const [meetingSpaceNames, setMeetingSpaceNames] = useState<Record<string, string>>({});
+  const [pendingByMeeting, setPendingByMeeting] = useState<Record<string, string>>({});
+  const [assignErrors, setAssignErrors] = useState<Record<string, string>>({});
   const [canScrollSpacesLeft, setCanScrollSpacesLeft] = useState(false);
   const [canScrollSpacesRight, setCanScrollSpacesRight] = useState(false);
   const [isDraggingSpaces, setIsDraggingSpaces] = useState(false);
   const spacesRailRef = useRef<HTMLDivElement>(null);
-  const spacesDragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
+  const spacesDragRef = useRef({
+    active: false,
+    startX: 0,
+    scrollLeft: 0,
+    moved: false,
+    spaceId: null as string | null,
+  });
+  const [assignMeetingSpace] = useAssignMeetingSpaceMutation();
 
   const {
     data: spacesData,
@@ -310,7 +350,10 @@ export const MeetingsPage = () => {
     hasNextPage: hasMoreMeetings,
     isFetchingNextPage: isFetchingMoreMeetings,
   } = useGetMeetingsInfiniteQuery(
-    { limit: MEETINGS_PAGE_SIZE },
+    {
+      limit: MEETINGS_PAGE_SIZE,
+      ...(filterSpaceId ? { spaceId: filterSpaceId } : {}),
+    },
     { skip: !userId, refetchOnMountOrArgChange: true },
   );
 
@@ -345,7 +388,25 @@ export const MeetingsPage = () => {
 
       return changed ? next : current;
     });
-  }, [meetings]);
+
+    setMeetingSpaceNames((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const meeting of meetings) {
+        if (!meeting.spaceId || next[meeting.id]) {
+          continue;
+        }
+        const match = spaces.find((space) => space.id === meeting.spaceId);
+        if (match) {
+          next[meeting.id] = match.name;
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [meetings, spaces]);
 
   const updateSpacesScrollState = () => {
     const rail = spacesRailRef.current;
@@ -355,9 +416,9 @@ export const MeetingsPage = () => {
       return;
     }
 
-    const maxScroll = rail.scrollWidth - rail.clientWidth;
-    setCanScrollSpacesLeft(rail.scrollLeft > 4);
-    setCanScrollSpacesRight(maxScroll > 4 && rail.scrollLeft < maxScroll - 4);
+    const maxScroll = Math.max(0, rail.scrollWidth - rail.clientWidth);
+    setCanScrollSpacesLeft(rail.scrollLeft > 2);
+    setCanScrollSpacesRight(maxScroll > 2 && rail.scrollLeft < maxScroll - 2);
   };
 
   useEffect(() => {
@@ -366,15 +427,20 @@ export const MeetingsPage = () => {
       return;
     }
 
-    updateSpacesScrollState();
-    const onScroll = () => updateSpacesScrollState();
-    rail.addEventListener('scroll', onScroll, { passive: true });
+    const refresh = () => updateSpacesScrollState();
+    refresh();
+    const rafId = window.requestAnimationFrame(refresh);
+    const timeoutId = window.setTimeout(refresh, 120);
 
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateSpacesScrollState) : null;
+    rail.addEventListener('scroll', refresh, { passive: true });
+
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refresh) : null;
     observer?.observe(rail);
 
     return () => {
-      rail.removeEventListener('scroll', onScroll);
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timeoutId);
+      rail.removeEventListener('scroll', refresh);
       observer?.disconnect();
     };
   }, [spaces.length, hasMoreSpaces, isSpacesLoading, isSpacesError, userId]);
@@ -386,7 +452,11 @@ export const MeetingsPage = () => {
     }
 
     const amount = Math.max(220, Math.round(rail.clientWidth * 0.7));
-    rail.scrollBy({ left: direction * amount, behavior: 'smooth' });
+    const maxScroll = Math.max(0, rail.scrollWidth - rail.clientWidth);
+    const nextLeft = Math.min(maxScroll, Math.max(0, rail.scrollLeft + direction * amount));
+
+    rail.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    window.setTimeout(updateSpacesScrollState, 320);
   };
 
   const handleSpacesPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -395,7 +465,11 @@ export const MeetingsPage = () => {
     }
 
     const target = event.target as HTMLElement | null;
-    if (target?.closest('button, a, input, textarea, label')) {
+    if (
+      target?.closest(
+        '.meetings-spaces__nav, .meetings-space-card--more, .meetings-space-card--state button, a, input, textarea, label',
+      )
+    ) {
       return;
     }
 
@@ -404,12 +478,15 @@ export const MeetingsPage = () => {
       return;
     }
 
+    const spaceCard = target?.closest('.meetings-space-card[data-space-id]') as HTMLElement | null;
+
     spacesDragRef.current = {
       active: true,
       startX: event.clientX,
       scrollLeft: rail.scrollLeft,
+      moved: false,
+      spaceId: spaceCard?.dataset.spaceId || null,
     };
-    setIsDraggingSpaces(true);
     rail.setPointerCapture(event.pointerId);
   };
 
@@ -424,7 +501,15 @@ export const MeetingsPage = () => {
     }
 
     const delta = event.clientX - spacesDragRef.current.startX;
-    rail.scrollLeft = spacesDragRef.current.scrollLeft - delta;
+    if (!spacesDragRef.current.moved && Math.abs(delta) > 6) {
+      spacesDragRef.current.moved = true;
+      setIsDraggingSpaces(true);
+    }
+
+    if (spacesDragRef.current.moved) {
+      event.preventDefault();
+      rail.scrollLeft = spacesDragRef.current.scrollLeft - delta;
+    }
   };
 
   const handleSpacesPointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -432,13 +517,33 @@ export const MeetingsPage = () => {
       return;
     }
 
+    const { moved, spaceId } = spacesDragRef.current;
     spacesDragRef.current.active = false;
+    spacesDragRef.current.spaceId = null;
     setIsDraggingSpaces(false);
 
     const rail = spacesRailRef.current;
     if (rail?.hasPointerCapture(event.pointerId)) {
       rail.releasePointerCapture(event.pointerId);
     }
+
+    // Pointer capture on the rail swallows the card click — toggle on tap instead.
+    if (!moved && spaceId) {
+      setFilterSpaceId((current) => (current === spaceId ? null : spaceId));
+      setMenuMeetingId(null);
+    }
+
+    spacesDragRef.current.moved = false;
+  };
+
+  const toggleSpaceFilter = (spaceId: string) => {
+    setFilterSpaceId((current) => (current === spaceId ? null : spaceId));
+    setMenuMeetingId(null);
+  };
+
+  const resetSpaceFilter = () => {
+    setFilterSpaceId(null);
+    setMenuMeetingId(null);
   };
 
   const selectedMeeting = useMemo(
@@ -449,16 +554,100 @@ export const MeetingsPage = () => {
   const spacesErrorMessage = getErrorMessage(spacesError, 'Unable to load spaces');
   const meetingsErrorMessage = getErrorMessage(meetingsError, 'Unable to load meetings');
 
-  const toggleMeetingSpace = (meetingId: string, spaceId: string) => {
-    setMeetingSpaceIds((current) => {
-      const existing = current[meetingId] ?? [];
-      const nextIds = existing.includes(spaceId) ? [] : [spaceId];
+  const toggleMeetingSpace = async (meetingId: string, spaceId: string) => {
+    if (pendingByMeeting[meetingId]) {
+      return;
+    }
 
-      return {
-        ...current,
-        [meetingId]: nextIds,
-      };
+    const currentIds = meetingSpaceIds[meetingId] ?? [];
+    const meeting = meetings.find((item) => item.id === meetingId);
+    const previousSpaceId = currentIds[0] ?? meeting?.spaceId ?? null;
+    const nextSpaceId = previousSpaceId === spaceId ? null : spaceId;
+    const nextSpaceName =
+      nextSpaceId != null
+        ? spaces.find((space) => space.id === nextSpaceId)?.name ?? null
+        : null;
+
+    setPendingByMeeting((current) => ({ ...current, [meetingId]: spaceId }));
+    setAssignErrors((current) => {
+      if (!current[meetingId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[meetingId];
+      return next;
     });
+
+    // Optimistic UI selection
+    setMeetingSpaceIds((current) => ({
+      ...current,
+      [meetingId]: nextSpaceId ? [nextSpaceId] : [],
+    }));
+    setMeetingSpaceNames((current) => {
+      if (nextSpaceId && nextSpaceName) {
+        return { ...current, [meetingId]: nextSpaceName };
+      }
+      const next = { ...current };
+      delete next[meetingId];
+      return next;
+    });
+
+    try {
+      const result = await assignMeetingSpace({
+        sessionId: meetingId,
+        spaceId: nextSpaceId,
+        previousSpaceId,
+      }).unwrap();
+
+      setMeetingSpaceIds((current) => ({
+        ...current,
+        [meetingId]: result.spaceId ? [result.spaceId] : [],
+      }));
+
+      if (result.spaceId) {
+        setMeetingSpaceNames((current) => ({
+          ...current,
+          [meetingId]:
+            result.spaceName ||
+            spaces.find((space) => space.id === result.spaceId)?.name ||
+            'Space',
+        }));
+      } else {
+        setMeetingSpaceNames((current) => {
+          const next = { ...current };
+          delete next[meetingId];
+          return next;
+        });
+      }
+    } catch (error) {
+      setMeetingSpaceIds((current) => ({
+        ...current,
+        [meetingId]: previousSpaceId ? [previousSpaceId] : [],
+      }));
+      setMeetingSpaceNames((current) => {
+        if (previousSpaceId) {
+          const restoredName =
+            current[meetingId] ||
+            spaces.find((space) => space.id === previousSpaceId)?.name;
+          if (restoredName) {
+            return { ...current, [meetingId]: restoredName };
+          }
+        }
+        const next = { ...current };
+        delete next[meetingId];
+        return next;
+      });
+      setAssignErrors((current) => ({
+        ...current,
+        [meetingId]: getErrorMessage(error, 'Unable to update meeting space'),
+      }));
+    } finally {
+      setPendingByMeeting((current) => {
+        const next = { ...current };
+        delete next[meetingId];
+        return next;
+      });
+    }
   };
 
   if (selectedId) {
@@ -475,6 +664,9 @@ export const MeetingsPage = () => {
   const showMeetingsError = Boolean(userId) && isMeetingsError && meetings.length === 0;
   const showMeetingsEmpty =
     Boolean(userId) && !isMeetingsLoading && !isMeetingsError && meetings.length === 0;
+  const filterSpaceName = filterSpaceId
+    ? spaces.find((space) => space.id === filterSpaceId)?.name ?? 'Selected space'
+    : null;
 
   return (
     <section className="meetings-page" aria-label="Meetings">
@@ -515,6 +707,19 @@ export const MeetingsPage = () => {
       <section className="meetings-spaces" aria-label="Spaces">
         <div className="meetings-spaces__head">
           <h2>Spaces</h2>
+          {filterSpaceId ? (
+            <button
+              type="button"
+              className="meetings-spaces__reset"
+              onClick={resetSpaceFilter}
+              aria-label="Clear space filter"
+            >
+              <FiX aria-hidden="true" size={14} />
+              Clear filter
+            </button>
+          ) : (
+            <span className="meetings-spaces__hint">Tap a space to filter meetings</span>
+          )}
         </div>
         <div className="meetings-spaces__track">
           <button
@@ -566,20 +771,43 @@ export const MeetingsPage = () => {
               </div>
             ) : null}
 
-            {spaces.map((space) => (
-              <article key={space.id} className="meetings-space-card">
-                <span className="meetings-space-card__icon" aria-hidden="true">
-                  <FiFolder size={16} />
-                </span>
-                <div className="meetings-space-card__body">
-                  <strong>{space.name}</strong>
-                  <p>{space.description || 'No description'}</p>
-                  <span className="meetings-space-card__meta">
-                    {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} · {space.updatedAtLabel}
+            {spaces.map((space) => {
+              const isSelected = filterSpaceId === space.id;
+
+              return (
+                <div
+                  key={space.id}
+                  role="button"
+                  tabIndex={0}
+                  data-space-id={space.id}
+                  className={`meetings-space-card${isSelected ? ' is-selected' : ''}`}
+                  aria-pressed={isSelected}
+                  aria-label={
+                    isSelected
+                      ? `Clear filter for ${space.name}`
+                      : `Filter meetings by ${space.name}`
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      toggleSpaceFilter(space.id);
+                    }
+                  }}
+                >
+                  <span className="meetings-space-card__icon" aria-hidden="true">
+                    <FiFolder size={16} />
+                  </span>
+                  <span className="meetings-space-card__body">
+                    <strong>{space.name}</strong>
+                    <span>{space.description || 'No description'}</span>
+                    <span className="meetings-space-card__meta">
+                      {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} ·{' '}
+                      {space.updatedAtLabel}
+                    </span>
                   </span>
                 </div>
-              </article>
-            ))}
+              );
+            })}
 
             {hasMoreSpaces ? (
               <button
@@ -630,20 +858,38 @@ export const MeetingsPage = () => {
       {showMeetingsError ? (
         <div className="meetings-empty meetings-empty--error" role="alert">
           <FiAlertCircle aria-hidden="true" size={28} />
-          <h2>Unable to load meetings</h2>
+          <h2>{filterSpaceId ? 'Unable to load filtered meetings' : 'Unable to load meetings'}</h2>
           <p>{meetingsErrorMessage}</p>
-          <button type="button" className="home-retry-button" onClick={() => void refetchMeetings()}>
-            <FiRefreshCw aria-hidden="true" size={14} />
-            Retry
-          </button>
+          <div className="meetings-empty__actions">
+            <button type="button" className="home-retry-button" onClick={() => void refetchMeetings()}>
+              <FiRefreshCw aria-hidden="true" size={14} />
+              Retry
+            </button>
+            {filterSpaceId ? (
+              <button type="button" className="home-retry-button" onClick={resetSpaceFilter}>
+                <FiX aria-hidden="true" size={14} />
+                Clear filter
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
       {showMeetingsEmpty ? (
         <div className="meetings-empty">
           <FiVideo aria-hidden="true" size={28} />
-          <h2>No meetings yet</h2>
-          <p>Recordings from your Buddy meeting extension will show up here.</p>
+          <h2>{filterSpaceId ? 'No meetings in this space' : 'No meetings yet'}</h2>
+          <p>
+            {filterSpaceId
+              ? `Nothing is associated with ${filterSpaceName || 'this space'} yet. Associate a meeting from the card menu, or clear the filter.`
+              : 'Recordings from your Buddy meeting extension will show up here.'}
+          </p>
+          {filterSpaceId ? (
+            <button type="button" className="home-retry-button" onClick={resetSpaceFilter}>
+              <FiX aria-hidden="true" size={14} />
+              Clear filter
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -663,7 +909,11 @@ export const MeetingsPage = () => {
           <div className={`meetings-grid${viewMode === 'list' ? ' is-list' : ''}`}>
             {meetings.map((meeting) => {
               const selectedSpaceId = meetingSpaceIds[meeting.id]?.[0] ?? meeting.spaceId;
-              const hasAssociatedSpace = Boolean(selectedSpaceId);
+              const spaceName =
+                meetingSpaceNames[meeting.id] ||
+                (selectedSpaceId
+                  ? spaces.find((space) => space.id === selectedSpaceId)?.name
+                  : null);
 
               return (
                 <article
@@ -687,8 +937,11 @@ export const MeetingsPage = () => {
                       <div className="meeting-card__body">
                         <div className="meeting-card__title-row">
                           <h2>{meeting.title}</h2>
-                          {hasAssociatedSpace ? (
-                            <span className="meeting-card__space-count">1 space</span>
+                          {spaceName ? (
+                            <span className="meeting-card__space-count" title={spaceName}>
+                              <FiFolder aria-hidden="true" size={11} />
+                              {spaceName}
+                            </span>
                           ) : null}
                         </div>
                         <div className="meeting-card__meta">
@@ -720,6 +973,8 @@ export const MeetingsPage = () => {
                       selectedSpaceIds={
                         meetingSpaceIds[meeting.id] ?? (meeting.spaceId ? [meeting.spaceId] : [])
                       }
+                      pendingSpaceId={pendingByMeeting[meeting.id] ?? null}
+                      assignError={assignErrors[meeting.id] ?? null}
                       isSpacesLoading={isSpacesLoading}
                       isSpacesError={isSpacesError}
                       spacesErrorMessage={spacesErrorMessage}
@@ -727,7 +982,9 @@ export const MeetingsPage = () => {
                       isFetchingMoreSpaces={isFetchingMoreSpaces}
                       onOpen={() => setMenuMeetingId(meeting.id)}
                       onClose={() => setMenuMeetingId(null)}
-                      onToggleSpace={(spaceId) => toggleMeetingSpace(meeting.id, spaceId)}
+                      onToggleSpace={(spaceId) => {
+                        void toggleMeetingSpace(meeting.id, spaceId);
+                      }}
                       onRetrySpaces={() => void refetchSpaces()}
                       onLoadMoreSpaces={() => void fetchNextSpacesPage()}
                     />
