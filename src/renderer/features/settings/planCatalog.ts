@@ -49,7 +49,7 @@ export const plans: DesktopPlan[] = [
       tasks: '50',
       recordingHours: '2 hrs',
     },
-    features: ['Personal spaces', 'Basic notes and tasks', 'Limited meeting recording', 'Buddy AI chat preview'],
+    features: ['Personal spaces', 'Basic notes and tasks', 'Limited meeting recording', 'KukuNotes AI chat preview'],
     languages: ['English', 'Hindi'],
   },
   {

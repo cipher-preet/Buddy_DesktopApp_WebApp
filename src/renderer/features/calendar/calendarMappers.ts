@@ -49,16 +49,30 @@ export const formatDateLabel = (dateKey: string) => {
   });
 };
 
-const categoryFromFeedItem = (item: CalendarFeedItemDto): EventCategory => {
-  if (item.source === 'conversation') {
-    return 'meeting';
-  }
-  return 'meeting';
-};
+const categoryFromFeedItem = (item: CalendarFeedItemDto): EventCategory =>
+  item.allDay ? 'allday' : 'meeting';
 
 export const mapFeedToCalendarEvent = (item: CalendarFeedItemDto): CalendarEvent | null => {
   if (item.kind !== 'meeting') {
     return null;
+  }
+
+  const shared = {
+    id: `${item.source}:${item.id}`,
+    title: item.title || (item.allDay ? 'Event' : 'Meeting'),
+    description: item.description || item.location || undefined,
+    category: categoryFromFeedItem(item),
+    date: item.dateKey,
+    canJoin: false,
+    source: item.source,
+    spaceName: item.spaceName,
+    provider: item.provider ?? null,
+    allDay: Boolean(item.allDay),
+    externalUrl: item.externalUrl ?? null,
+  };
+
+  if (item.allDay) {
+    return { ...shared, startMinutes: 0, endMinutes: 23 * 60 + 59 };
   }
 
   const startMinutes = parseTimeLabelToMinutes(item.startTimeLabel) ?? 9 * 60;
@@ -67,18 +81,7 @@ export const mapFeedToCalendarEvent = (item: CalendarFeedItemDto): CalendarEvent
     parseTimeLabelToMinutes(item.endTimeLabel) ?? startMinutes + 60,
   );
 
-  return {
-    id: `${item.source}:${item.id}`,
-    title: item.title || 'Meeting',
-    description: item.description || item.location || undefined,
-    category: categoryFromFeedItem(item),
-    date: item.dateKey,
-    startMinutes,
-    endMinutes,
-    canJoin: false,
-    source: item.source,
-    spaceName: item.spaceName,
-  };
+  return { ...shared, startMinutes, endMinutes };
 };
 
 export const mapFeedToDayItem = (item: CalendarFeedItemDto): CalendarDayItem | null => {

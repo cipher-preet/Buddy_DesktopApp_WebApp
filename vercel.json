@@ -1,0 +1,43 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci",
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/v1/chat/:path*",
+      "destination": "https://buddy-ai-api-710178903619.asia-south1.run.app/api/v1/chat/:path*"
+    },
+    {
+      "source": "/api/v1/speech/:path*",
+      "destination": "https://buddy-ai-api-710178903619.asia-south1.run.app/api/v1/speech/:path*"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://buddy-node-backend-scz7pyp3ha-el.a.run.app/api/:path*"
+    },
+    {
+      "source": "/((?!assets/|api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/index.html",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "microphone=(self), camera=()" }
+      ]
+    }
+  ]
+}

@@ -9,6 +9,7 @@ export type ChatSessionDto = {
   id: string;
   userId: string;
   spaceId: string | null;
+  meetingId?: string | null;
   title: string | null;
   status: string;
   messageCount: number;
@@ -33,10 +34,22 @@ export type ChatSessionDetailDto = {
   messages: ChatMessageDto[];
 };
 
+export type ChatCreatedItemDto = {
+  kind: 'task' | 'note';
+  id: string | null;
+  title: string;
+  dueDate: string | null;
+  priority: string | null;
+  spaceId: string;
+  spaceName: string;
+};
+
 export type AskChatDto = {
   chatId: string;
   createdNewChat: boolean;
   answer: string;
+  meetingId?: string;
+  createdItems?: ChatCreatedItemDto[];
 };
 
 export type ChatSession = {

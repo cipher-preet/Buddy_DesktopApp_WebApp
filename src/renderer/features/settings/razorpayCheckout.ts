@@ -149,7 +149,7 @@ export const openRazorpayCheckout = async (
       key: request.keyId,
       amount: request.amount,
       currency: request.currency,
-      name: 'Buddy',
+      name: 'KukuNotes',
       description: request.description,
       order_id: request.orderId,
       prefill: {

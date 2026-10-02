@@ -202,6 +202,8 @@ export const api = createApi({
     'ChatMessages',
     'CalendarFeed',
     'Meetings',
+    'Integrations',
+    'Notifications',
   ],
   endpoints: (builder) => ({
     getHealth: builder.query<HealthResponse, void>({

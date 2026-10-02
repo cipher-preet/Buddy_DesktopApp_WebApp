@@ -33,6 +33,8 @@ import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 
 type AiChatViewProps = {
   compact?: boolean;
+  /** Scopes the chat to one meeting: answers come from its transcript, and created tasks/notes link to it. */
+  meetingId?: string;
 };
 
 const SESSIONS_PAGE_SIZE = 20;
@@ -41,8 +43,14 @@ const SUGGESTIONS = [
   'What tasks are still open?',
   'Tell me about my notes',
 ];
+const MEETING_SUGGESTIONS = [
+  'Summarize this meeting',
+  'What are the action items?',
+  'What decisions were made?',
+  'Create tasks from the action items',
+];
 
-export const AiChatView = ({ compact = false }: AiChatViewProps) => {
+export const AiChatView = ({ compact = false, meetingId }: AiChatViewProps) => {
   const { showToast } = useToast();
   const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
@@ -65,6 +73,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const sendingLockRef = useRef(false);
+  const meetingThreadRestoredRef = useRef(false);
 
   const {
     data: sessionsData,
@@ -77,7 +86,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
     hasNextPage: hasMoreSessions,
     isFetchingNextPage: isFetchingMoreSessions,
   } = useGetChatSessionsInfiniteQuery(
-    { userId: userId || '', limit: SESSIONS_PAGE_SIZE },
+    { userId: userId || '', limit: SESSIONS_PAGE_SIZE, ...(meetingId ? { meetingId } : {}) },
     { skip: !userId },
   );
 
@@ -240,7 +249,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
       const data = await loadChatSession({ userId, sessionId }).unwrap();
       setActiveSessionId(data.chat.id);
       setMessages(data.messages);
-      if (data.chat.spaceId) {
+      if (data.chat.spaceId && !meetingId) {
         setSelectedSpaceIds((current) =>
           current.includes(data.chat.spaceId as string) ? current : [...current, data.chat.spaceId as string],
         );
@@ -255,6 +264,19 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
     }
   };
 
+  const latestMeetingSessionId = meetingId ? (sessions[0]?.id ?? null) : null;
+  useEffect(() => {
+    if (!meetingId || meetingThreadRestoredRef.current || isSessionsLoading) {
+      return;
+    }
+    meetingThreadRestoredRef.current = true;
+    if (latestMeetingSessionId && !activeSessionId && messages.length === 0) {
+      void handleSelectSession(latestMeetingSessionId);
+    }
+    // Restore once per mounted meeting; later session list refreshes must not replace the open thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId, isSessionsLoading, latestMeetingSessionId]);
+
   const ensureActiveSession = async () => {
     if (!userId) {
       throw new Error('Please sign in again to continue.');
@@ -267,6 +289,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
     const session = await createChatSession({
       userId,
       ...(selectedSpaceId ? { spaceId: selectedSpaceId } : {}),
+      ...(meetingId ? { meetingId } : {}),
     }).unwrap();
     setActiveSessionId(session.id);
     return session.id;
@@ -312,6 +335,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
               spaceIds: selectedSpaceIds,
             }
           : {}),
+        ...(meetingId ? { meetingId } : {}),
       }).unwrap();
 
       if (result.chatId && result.chatId !== sessionId) {
@@ -323,11 +347,11 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
         {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
-          content: result.answer?.trim() || 'Buddy did not return a response.',
+          content: result.answer?.trim() || 'KukuNotes did not return a response.',
         },
       ]);
     } catch (error) {
-      const message = getChatErrorMessage(error, 'Buddy could not answer that question');
+      const message = getChatErrorMessage(error, 'KukuNotes could not answer that question');
       if (handleApiError(error, message)) {
         return;
       }
@@ -512,13 +536,15 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
             </span>
             <h2>Hi {userName}</h2>
             <p>
-              {compact
-                ? 'Ask anything about this meeting.'
-                : 'Ask anything about your conversations, notes, and tasks.'}
+              {meetingId
+                ? 'Ask anything about this meeting, or ask me to create tasks and notes from it.'
+                : compact
+                  ? 'Ask anything about this meeting.'
+                  : 'Ask anything about your conversations, notes, and tasks.'}
             </p>
-            {!compact ? (
+            {!compact || meetingId ? (
               <div className="ai-chat-suggestions">
-                {SUGGESTIONS.map((suggestion) => (
+                {(meetingId ? MEETING_SUGGESTIONS : SUGGESTIONS).map((suggestion) => (
                   <button key={suggestion} type="button" onClick={() => void handleSend(suggestion)}>
                     {suggestion}
                   </button>
@@ -579,7 +605,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
 
             {isSending ? (
               <article className="chat-turn chat-turn--assistant" aria-live="polite">
-                <div className="ai-typing" aria-label="Buddy is thinking">
+                <div className="ai-typing" aria-label="KukuNotes is thinking">
                   <span />
                   <span />
                   <span />
@@ -702,7 +728,7 @@ export const AiChatView = ({ compact = false }: AiChatViewProps) => {
 
           <textarea
             ref={composerRef}
-            placeholder="Ask anything about your conversations"
+            placeholder={meetingId ? 'Ask about this meeting' : 'Ask anything about your conversations'}
             rows={compact ? 1 : 2}
             value={draft}
             disabled={isSending || isThreadLoading}

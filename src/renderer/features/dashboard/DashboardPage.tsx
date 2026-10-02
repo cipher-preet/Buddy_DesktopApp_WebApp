@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   FiAlertCircle,
-  FiCalendar,
+  FiCheckSquare,
   FiFileText,
   FiFolder,
+  FiGrid,
+  FiList,
   FiPlus,
   FiRefreshCw,
 } from 'react-icons/fi';
 
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { useToast } from '@/app/ToastProvider';
+import type { DashboardFocusTarget } from '@/features/search/searchTypes';
+import { setShareSpace } from '@/features/share/shareSlice';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import {
   useCreateSpaceMutation,
@@ -29,6 +33,9 @@ import {
 
 import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote, WorkspaceSpace, WorkspaceTask } from './homeTypes';
+import { NoteBoard, NoteReader, type NoteLayout } from './NoteBoard';
+import { TaskBoard, type TaskFilter } from './TaskBoard';
+import { TaskFilterMenu } from './TaskFilterMenu';
 import {
   ConfirmDeleteModal,
   CreateNoteModal,
@@ -53,17 +60,25 @@ type DeleteTarget =
 type DashboardPageProps = {
   focusSection?: HomeSectionFocus | null;
   onFocusHandled?: () => void;
+  focusTarget?: DashboardFocusTarget | null;
+  onFocusTargetHandled?: () => void;
 };
 
 const SPACES_PAGE_SIZE = 10;
 const ITEMS_PAGE_SIZE = 10;
-const TASK_STATUS_THROTTLE_MS = 450;
+/** Upper bound on extra pages fetched while locating a search result. */
+const FOCUS_MAX_PAGE_LOADS = 30;
+const SEARCH_HIGHLIGHT_MS = 2600;
+const NOTE_LAYOUT_KEY = 'buddy.home.noteLayout';
 
-const statusLabel = {
-  done: 'Done',
-  open: 'Open',
-  review: 'Review',
-} as const;
+const readNoteLayout = (): NoteLayout => {
+  try {
+    return localStorage.getItem(NOTE_LAYOUT_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+};
+const TASK_STATUS_THROTTLE_MS = 450;
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error === 'object' && error && 'data' in error) {
@@ -80,7 +95,13 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   return fallback;
 };
 
-export const DashboardPage = ({ focusSection = null, onFocusHandled }: DashboardPageProps) => {
+export const DashboardPage = ({
+  focusSection = null,
+  onFocusHandled,
+  focusTarget = null,
+  onFocusTargetHandled,
+}: DashboardPageProps) => {
+  const dispatch = useAppDispatch();
   const { showToast } = useToast();
   const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
@@ -96,6 +117,12 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
   const [isMutating, setIsMutating] = useState(false);
   const taskStatusTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const taskStatusPendingRef = useRef<Map<string, boolean>>(new Map());
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
+  const [noteLayout, setNoteLayout] = useState<NoteLayout>(readNoteLayout);
+  const [readingNote, setReadingNote] = useState<WorkspaceNote | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<DashboardFocusTarget | null>(null);
+  const [searchHitId, setSearchHitId] = useState<string | null>(null);
+  const focusLoadsRef = useRef({ spaces: 0, items: 0, refetched: false });
 
   const {
     data: spacesData,
@@ -148,6 +175,18 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
     [selectedSpaceId, spaces],
   );
 
+  useEffect(() => {
+    if (selectedSpace) {
+      dispatch(setShareSpace(selectedSpace));
+      return;
+    }
+
+    // Only clear once the list has settled, so the Share tab doesn't flash empty while loading.
+    if (!isSpacesLoading && !isSpacesFetching && spaces.length === 0) {
+      dispatch(setShareSpace(null));
+    }
+  }, [dispatch, isSpacesFetching, isSpacesLoading, selectedSpace, spaces.length]);
+
   const shouldLoadTasks = Boolean(userId && selectedSpace?.id && activeSection === 'tasks');
   const shouldLoadNotes = Boolean(userId && selectedSpace?.id && activeSection === 'notes');
 
@@ -191,6 +230,134 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
 
   const tasks = useMemo(() => tasksData?.pages.flatMap((page) => page.tasks) ?? [], [tasksData]);
   const notes = useMemo(() => notesData?.pages.flatMap((page) => page.notes) ?? [], [notesData]);
+
+  const taskCounts = useMemo(() => {
+    const done = tasks.filter((task) => completedTaskIds.has(task.id)).length;
+    return { all: tasks.length, open: tasks.length - done, done };
+  }, [completedTaskIds, tasks]);
+
+  const changeNoteLayout = (layout: NoteLayout) => {
+    setNoteLayout(layout);
+    try {
+      localStorage.setItem(NOTE_LAYOUT_KEY, layout);
+    } catch {
+      // Layout preference is optional.
+    }
+  };
+
+  useEffect(() => {
+    setReadingNote(null);
+  }, [selectedSpaceId]);
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+    focusLoadsRef.current = { spaces: 0, items: 0, refetched: false };
+    setTaskFilter('all');
+    setPendingFocus(focusTarget);
+    if (focusTarget.section) {
+      setActiveSection(focusTarget.section);
+    }
+    onFocusTargetHandled?.();
+  }, [focusTarget, onFocusTargetHandled]);
+
+  useEffect(() => {
+    if (!pendingFocus) {
+      return;
+    }
+    if (spaces.some((space) => space.id === pendingFocus.spaceId)) {
+      setSelectedSpaceId(pendingFocus.spaceId);
+      if (!pendingFocus.itemId) {
+        setSearchHitId(pendingFocus.spaceId);
+        setPendingFocus(null);
+      }
+      return;
+    }
+    if (isSpacesFetching) {
+      return;
+    }
+    if (hasMoreSpaces && focusLoadsRef.current.spaces < FOCUS_MAX_PAGE_LOADS) {
+      focusLoadsRef.current.spaces += 1;
+      void fetchNextSpacesPage();
+      return;
+    }
+    setPendingFocus(null);
+    showToast({ message: 'That space is no longer available.', type: 'error' });
+  }, [fetchNextSpacesPage, hasMoreSpaces, isSpacesFetching, pendingFocus, showToast, spaces]);
+
+  useEffect(() => {
+    if (!pendingFocus?.itemId || !pendingFocus.section) {
+      return;
+    }
+    if (selectedSpace?.id !== pendingFocus.spaceId || activeSection !== pendingFocus.section) {
+      return;
+    }
+    const isTasks = pendingFocus.section === 'tasks';
+    const items: Array<{ id: string }> = isTasks ? tasks : notes;
+    if (items.some((item) => item.id === pendingFocus.itemId)) {
+      setSearchHitId(pendingFocus.itemId);
+      setPendingFocus(null);
+      return;
+    }
+    const isFetching = isTasks ? isTasksFetching : isNotesFetching;
+    const isLoading = isTasks ? isTasksLoading : isNotesLoading;
+    if (isFetching || isLoading) {
+      return;
+    }
+    const loads = focusLoadsRef.current;
+    if ((isTasks ? hasMoreTasks : hasMoreNotes) && loads.items < FOCUS_MAX_PAGE_LOADS) {
+      loads.items += 1;
+      void (isTasks ? fetchNextTasksPage() : fetchNextNotesPage());
+      return;
+    }
+    if (!loads.refetched) {
+      // Cached pages can predate the item; one fresh load before giving up.
+      loads.refetched = true;
+      loads.items = 0;
+      void (isTasks ? refetchTasks() : refetchNotes());
+      return;
+    }
+    setPendingFocus(null);
+    setSearchHitId(pendingFocus.spaceId);
+    showToast({
+      message: `Couldn't find that ${isTasks ? 'task' : 'note'} — it may have been deleted.`,
+      type: 'error',
+    });
+  }, [
+    activeSection,
+    fetchNextNotesPage,
+    fetchNextTasksPage,
+    hasMoreNotes,
+    hasMoreTasks,
+    isNotesFetching,
+    isNotesLoading,
+    isTasksFetching,
+    isTasksLoading,
+    notes,
+    pendingFocus,
+    refetchNotes,
+    refetchTasks,
+    selectedSpace?.id,
+    showToast,
+    tasks,
+  ]);
+
+  useEffect(() => {
+    if (!searchHitId) {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-search-id="${CSS.escape(searchHitId)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    const timer = window.setTimeout(() => setSearchHitId(null), SEARCH_HIGHLIGHT_MS);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [searchHitId]);
 
   useEffect(() => {
     setCompletedTaskIds(() => {
@@ -540,6 +707,8 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
   const showNotesInitialLoading = shouldLoadNotes && isNotesLoading && notes.length === 0;
 
   return (
+    <>
+    <div className="home-container">
     <section className="home-workspace" aria-label="Home workspace">
       <aside className="spaces-panel" aria-label="Spaces">
         <div className="spaces-panel__header">
@@ -591,13 +760,15 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
 
             return (
               <div
-                className={`space-item${isMenuOpen ? ' is-menu-open' : ''}`}
+                className={`space-item${isMenuOpen ? ' is-menu-open' : ''}${searchHitId === space.id ? ' is-search-hit' : ''}`}
                 data-active={space.id === selectedSpace?.id ? 'true' : undefined}
+                data-search-id={space.id}
                 key={space.id}
               >
                 <button
                   className="space-item__select"
                   type="button"
+                  title={space.name}
                   onClick={() => {
                     setSelectedSpaceId(space.id);
                     setOpenItemMenuId(null);
@@ -657,10 +828,48 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
               <FiFolder aria-hidden="true" size={20} />
             </span>
             <h3>Select a space</h3>
-            <p>Choose a space from the left to view its tasks and notes.</p>
+            <p>Choose a space to view its tasks and notes.</p>
           </div>
         ) : (
           <>
+            <header className="space-hero">
+              <div className="space-hero__identity">
+                <span className="space-hero__icon">
+                  <FiFolder aria-hidden="true" size={20} />
+                </span>
+                <div className="space-hero__text">
+                  <h2>{selectedSpace.name}</h2>
+                  <p>
+                    {selectedSpace.description && selectedSpace.description !== 'New'
+                      ? selectedSpace.description
+                      : `Updated ${selectedSpace.updatedAtLabel.toLowerCase()}`}
+                  </p>
+                </div>
+              </div>
+              <dl className="space-hero__stats">
+                <div>
+                  <dt>Tasks</dt>
+                  <dd>{selectedSpace.tasksCount}</dd>
+                </div>
+                <div>
+                  <dt>Notes</dt>
+                  <dd>{selectedSpace.notesCount}</dd>
+                </div>
+                {activeSection === 'tasks' && tasks.length > 0 ? (
+                  <div className="space-hero__progress">
+                    <dt>Done</dt>
+                    <dd>
+                      {Math.round((taskCounts.done / tasks.length) * 100)}%
+                      <span
+                        className="space-hero__meter"
+                        style={{ '--progress': `${(taskCounts.done / tasks.length) * 100}%` } as CSSProperties}
+                      />
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </header>
+
             <div className="space-detail__toolbar">
               <div
                 className={`space-switch${activeSection === 'notes' ? ' is-notes' : ' is-tasks'}`}
@@ -679,6 +888,7 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
                     setOpenItemMenuId(null);
                   }}
                 >
+                  <FiCheckSquare aria-hidden="true" size={14} />
                   Tasks
                 </button>
                 <button
@@ -692,30 +902,69 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
                     setOpenItemMenuId(null);
                   }}
                 >
+                  <FiFileText aria-hidden="true" size={14} />
                   Notes
                 </button>
               </div>
 
-              {activeSection === 'tasks' ? (
-                <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
+              <div className="space-detail__tools">
+                {activeSection === 'tasks' ? (
+                  <TaskFilterMenu value={taskFilter} counts={taskCounts} onChange={setTaskFilter} />
+                ) : null}
+                {activeSection === 'tasks' ? (
+                  <div className="segmented-filter segmented-filter--tasks" role="group" aria-label="Filter tasks">
+                    {(['all', 'open', 'done'] as const).map((filter) => (
+                      <button
+                        key={filter}
+                        type="button"
+                        data-active={taskFilter === filter ? 'true' : undefined}
+                        onClick={() => setTaskFilter(filter)}
+                      >
+                        {filter === 'all' ? 'All' : filter === 'open' ? 'Open' : 'Done'}
+                        <span>{taskCounts[filter]}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="segmented-filter segmented-filter--icons" role="group" aria-label="Notes layout">
+                    <button
+                      type="button"
+                      aria-label="Grid view"
+                      data-active={noteLayout === 'grid' ? 'true' : undefined}
+                      onClick={() => changeNoteLayout('grid')}
+                    >
+                      <FiGrid aria-hidden="true" size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="List view"
+                      data-active={noteLayout === 'list' ? 'true' : undefined}
+                      onClick={() => changeNoteLayout('list')}
+                    >
+                      <FiList aria-hidden="true" size={14} />
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  className="home-create-button"
+                  type="button"
+                  onClick={() => setCreateModal(activeSection === 'tasks' ? 'task' : 'note')}
+                >
                   <FiPlus aria-hidden="true" size={15} />
-                  New task
+                  <span>{activeSection === 'tasks' ? 'New task' : 'New note'}</span>
                 </button>
-              ) : (
-                <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
-                  <FiPlus aria-hidden="true" size={15} />
-                  New note
-                </button>
-              )}
+              </div>
             </div>
 
             <div className="space-sections">
               {activeSection === 'tasks' ? (
                 <section className="workspace-card" aria-label="Tasks">
                   {showTasksInitialLoading ? (
-                    <div className="home-inline-state" aria-busy="true">
-                      <span className="home-spinner" />
-                      <p>Loading tasks…</p>
+                    <div className="item-skeletons" aria-busy="true" aria-label="Loading tasks">
+                      {[0, 1, 2, 3].map((row) => (
+                        <span key={row} />
+                      ))}
                     </div>
                   ) : null}
 
@@ -733,10 +982,10 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
                   {!showTasksInitialLoading && !isTasksError && tasks.length === 0 ? (
                     <div className="home-empty-state">
                       <span className="home-empty-state__icon">
-                        <FiCalendar aria-hidden="true" size={20} />
+                        <FiCheckSquare aria-hidden="true" size={20} />
                       </span>
                       <h3>No tasks yet</h3>
-                      <p>Create a task manually to track work inside {selectedSpace.name}.</p>
+                      <p>Create a task to track work inside {selectedSpace.name}, or record a meeting and KukuNotes will add them for you.</p>
                       <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
                         <FiPlus aria-hidden="true" size={15} />
                         New task
@@ -746,79 +995,24 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
 
                   {tasks.length > 0 ? (
                     <>
-                      <div className="task-stack">
-                        {tasks.map((task) => {
-                          const isDone = completedTaskIds.has(task.id);
-                          const menuId = `task:${task.id}`;
-                          const isMenuOpen = openItemMenuId === menuId;
-
-                          return (
-                            <article
-                              className={`task-card${isMenuOpen ? ' is-menu-open' : ''}`}
-                              data-status={isDone ? 'done' : task.status}
-                              key={task.id}
-                            >
-                              <label className="task-card__toggle" aria-label={`Mark ${task.title} done`}>
-                                <input
-                                  type="checkbox"
-                                  checked={isDone}
-                                  onChange={() => toggleTaskCompletion(task.id)}
-                                />
-                                <span />
-                              </label>
-                              <div className="task-card__content">
-                                <h3>{task.title}</h3>
-                                {task.description ? <p>{task.description}</p> : null}
-                                <div className="task-card__meta">
-                                  <span
-                                    className="task-card__due"
-                                    data-tone={task.dueDateTone}
-                                  >
-                                    <FiCalendar aria-hidden="true" size={13} />
-                                    {task.dueDate}
-                                  </span>
-                                  <span
-                                    className="task-card__priority"
-                                    data-priority={task.priority}
-                                  >
-                                    {task.priority}
-                                  </span>
-                                  <span className="task-card__created">
-                                    {task.createdAtLabel}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="task-card__aside">
-                                <span className="task-card__status">
-                                  {isDone ? 'Done' : statusLabel[task.status]}
-                                </span>
-                                <ItemActionsMenu
-                                  itemLabel={task.title}
-                                  isOpen={isMenuOpen}
-                                  onOpen={() => setOpenItemMenuId(menuId)}
-                                  onClose={() => setOpenItemMenuId(null)}
-                                  onEdit={() => {
-                                    setOpenItemMenuId(null);
-                                    setEditTarget({ kind: 'task', task });
-                                  }}
-                                  onDelete={() => {
-                                    setOpenItemMenuId(null);
-                                    if (!selectedSpace) {
-                                      return;
-                                    }
-                                    setDeleteTarget({
-                                      kind: 'task',
-                                      id: task.id,
-                                      label: task.title,
-                                      spaceId: selectedSpace.id,
-                                    });
-                                  }}
-                                />
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
+                      <TaskBoard
+                        tasks={tasks}
+                        filter={taskFilter}
+                        completedTaskIds={completedTaskIds}
+                        openItemMenuId={openItemMenuId}
+                        searchHitId={searchHitId}
+                        onToggle={toggleTaskCompletion}
+                        onMenuChange={setOpenItemMenuId}
+                        onEdit={(task) => setEditTarget({ kind: 'task', task })}
+                        onDelete={(task) =>
+                          setDeleteTarget({
+                            kind: 'task',
+                            id: task.id,
+                            label: task.title,
+                            spaceId: selectedSpace.id,
+                          })
+                        }
+                      />
 
                       {hasMoreTasks ? (
                         <button
@@ -840,9 +1034,10 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
               ) : (
                 <section className="workspace-card" aria-label="Notes">
                   {showNotesInitialLoading ? (
-                    <div className="home-inline-state" aria-busy="true">
-                      <span className="home-spinner" />
-                      <p>Loading notes…</p>
+                    <div className="item-skeletons item-skeletons--grid" aria-busy="true" aria-label="Loading notes">
+                      {[0, 1, 2, 3].map((row) => (
+                        <span key={row} />
+                      ))}
                     </div>
                   ) : null}
 
@@ -863,7 +1058,7 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
                         <FiFileText aria-hidden="true" size={20} />
                       </span>
                       <h3>No notes yet</h3>
-                      <p>Capture ideas and decisions for {selectedSpace.name} with a manual note.</p>
+                      <p>Capture ideas and decisions for {selectedSpace.name}, or let KukuNotes take notes from your meetings.</p>
                       <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
                         <FiPlus aria-hidden="true" size={15} />
                         New note
@@ -873,57 +1068,26 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
 
                   {notes.length > 0 ? (
                     <>
-                      <div className="notes-stack">
-                        {notes.map((note) => {
-                          const menuId = `note:${note.id}`;
-                          const isMenuOpen = openItemMenuId === menuId;
-
-                          return (
-                            <article
-                              className={`space-note${isMenuOpen ? ' is-menu-open' : ''}`}
-                              key={note.id}
-                            >
-                              <span className="space-note__icon">
-                                <FiFileText aria-hidden="true" size={16} />
-                              </span>
-                              <div className="space-note__body">
-                                <div className="space-note__header">
-                                  <h3>{note.title}</h3>
-                                  <ItemActionsMenu
-                                    itemLabel={note.title}
-                                    isOpen={isMenuOpen}
-                                    onOpen={() => setOpenItemMenuId(menuId)}
-                                    onClose={() => setOpenItemMenuId(null)}
-                                    onEdit={() => {
-                                      setOpenItemMenuId(null);
-                                      setEditTarget({ kind: 'note', note });
-                                    }}
-                                    onDelete={() => {
-                                      setOpenItemMenuId(null);
-                                      if (!selectedSpace) {
-                                        return;
-                                      }
-                                      setDeleteTarget({
-                                        kind: 'note',
-                                        id: note.id,
-                                        label: note.title,
-                                        spaceId: selectedSpace.id,
-                                      });
-                                    }}
-                                  />
-                                </div>
-                                {note.excerpt ? <p>{note.excerpt}</p> : null}
-                                <div className="space-note__meta">
-                                  <span>
-                                    <FiCalendar aria-hidden="true" size={13} />
-                                    {note.dateLabel}
-                                  </span>
-                                </div>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
+                      <NoteBoard
+                        notes={notes}
+                        layout={noteLayout}
+                        openItemMenuId={openItemMenuId}
+                        searchHitId={searchHitId}
+                        onOpen={(note) => {
+                          setOpenItemMenuId(null);
+                          setReadingNote(note);
+                        }}
+                        onMenuChange={setOpenItemMenuId}
+                        onEdit={(note) => setEditTarget({ kind: 'note', note })}
+                        onDelete={(note) =>
+                          setDeleteTarget({
+                            kind: 'note',
+                            id: note.id,
+                            label: note.title,
+                            spaceId: selectedSpace.id,
+                          })
+                        }
+                      />
 
                       {hasMoreNotes ? (
                         <button
@@ -947,6 +1111,29 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
           </>
         )}
       </div>
+    </section>
+    </div>
+
+      {readingNote && selectedSpace ? (
+        <NoteReader
+          note={readingNote}
+          spaceName={selectedSpace.name}
+          onClose={() => setReadingNote(null)}
+          onEdit={() => {
+            setEditTarget({ kind: 'note', note: readingNote });
+            setReadingNote(null);
+          }}
+          onDelete={() => {
+            setDeleteTarget({
+              kind: 'note',
+              id: readingNote.id,
+              label: readingNote.title,
+              spaceId: selectedSpace.id,
+            });
+            setReadingNote(null);
+          }}
+        />
+      ) : null}
 
       {createModal === 'space' ? (
         <CreateSpaceModal
@@ -1047,6 +1234,6 @@ export const DashboardPage = ({ focusSection = null, onFocusHandled }: Dashboard
           onConfirm={handleConfirmDelete}
         />
       ) : null}
-    </section>
+    </>
   );
 };

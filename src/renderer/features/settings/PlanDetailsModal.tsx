@@ -370,7 +370,7 @@ export const PlanDetailsModal = ({
           <div>
             <p>Upgrade</p>
             <h2>Get Premium!</h2>
-            <span>Supercharge your productivity with Buddy.</span>
+            <span>Supercharge your productivity with KukuNotes.</span>
           </div>
           <button type="button" onClick={requestClose} aria-label="Close plan details" disabled={isSubmitting}>
             <FiX aria-hidden="true" size={18} />

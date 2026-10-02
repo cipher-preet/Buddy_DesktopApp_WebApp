@@ -19,6 +19,7 @@ export const CATEGORY_META: Record<
   meeting: { label: 'Meeting', icon: '👥', tone: 'meeting' },
   interview: { label: 'Interview', icon: '💼', tone: 'interview' },
   onboarding: { label: 'Onboarding', icon: '🚀', tone: 'onboarding' },
+  allday: { label: 'All day', icon: '📅', tone: 'holiday' },
 };
 
 export const DAY_ITEM_META: Record<

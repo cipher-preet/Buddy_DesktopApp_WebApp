@@ -8,8 +8,8 @@ export default defineConfig(({ mode }) => {
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5000';
 
   return {
-    // Relative asset paths so Electron can load the production build via file://
-    base: './',
+    // Electron loads the desktop build via file://, so it needs relative asset paths; the web build is served from /.
+    base: mode === 'desktop' ? './' : '/',
     plugins: [react()],
     resolve: {
       alias: {

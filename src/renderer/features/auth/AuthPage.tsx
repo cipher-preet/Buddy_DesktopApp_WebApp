@@ -267,7 +267,7 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
               <>
                 <h1>Continue to sign in</h1>
                 <p>
-                  Sync your <strong>work calendar</strong> to start using Buddy
+                  Sync your <strong>work calendar</strong> to start using KukuNotes
                 </p>
 
                 <div className="auth-actions">
@@ -316,7 +316,7 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
                 ) : null}
 
                 <p className="auth-terms">
-                  By using Buddy you agree to the <a href="#terms">Terms of Service</a> and{' '}
+                  By using KukuNotes you agree to the <a href="#terms">Terms of Service</a> and{' '}
                   <a href="#privacy">Privacy Policy</a>
                 </p>
               </>
@@ -334,7 +334,7 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
             </div>
 
             <blockquote>
-              &quot;Buddy helps you keep conversations, tasks, notes, and follow-ups in one calm desktop
+              &quot;KukuNotes helps you keep conversations, tasks, notes, and follow-ups in one calm desktop
               workspace, so your important work is always easy to find and continue.&quot;
             </blockquote>
           </div>

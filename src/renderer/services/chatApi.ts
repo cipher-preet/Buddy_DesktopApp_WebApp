@@ -16,6 +16,7 @@ export type CursorPageParam = string | null;
 export type ChatSessionsQueryArg = {
   userId: string;
   spaceId?: string | null;
+  meetingId?: string | null;
   limit?: number;
 };
 
@@ -50,6 +51,7 @@ export const chatApi = api.injectEndpoints({
           userId: queryArg.userId,
           limit: queryArg.limit ?? 20,
           ...(queryArg.spaceId ? { spaceId: queryArg.spaceId } : {}),
+          ...(queryArg.meetingId ? { meetingId: queryArg.meetingId } : {}),
           ...(pageParam ? { cursor: pageParam } : {}),
         },
       }),
@@ -84,13 +86,17 @@ export const chatApi = api.injectEndpoints({
       },
       providesTags: (_result, _error, arg) => [{ type: 'ChatMessages', id: arg.sessionId }],
     }),
-    createChatSession: builder.mutation<ChatSession, { userId: string; spaceId?: string | null }>({
-      query: ({ userId, spaceId }) => ({
+    createChatSession: builder.mutation<
+      ChatSession,
+      { userId: string; spaceId?: string | null; meetingId?: string | null }
+    >({
+      query: ({ userId, spaceId, meetingId }) => ({
         url: 'chat/sessions',
         method: 'POST',
         body: {
           userId,
           ...(spaceId ? { spaceId } : {}),
+          ...(meetingId ? { meetingId } : {}),
         },
       }),
       transformResponse: (response: ChatApiEnvelope<ChatSessionDto>) =>
@@ -105,9 +111,10 @@ export const chatApi = api.injectEndpoints({
         chatId?: string | null;
         spaceId?: string | null;
         spaceIds?: string[];
+        meetingId?: string | null;
       }
     >({
-      query: ({ userId, question, chatId, spaceId, spaceIds }) => {
+      query: ({ userId, question, chatId, spaceId, spaceIds, meetingId }) => {
         const authToken = getStoredAuthToken();
         return {
           url: 'chat/ask',
@@ -118,12 +125,13 @@ export const chatApi = api.injectEndpoints({
             ...(chatId ? { chatId } : {}),
             ...(spaceId ? { spaceId } : {}),
             ...(spaceIds && spaceIds.length > 0 ? { spaceIds } : {}),
+            ...(meetingId ? { meetingId } : {}),
             ...(authToken ? { authToken } : {}),
           },
         };
       },
       transformResponse: (response: ChatApiEnvelope<AskChatDto>) =>
-        unwrapChatData(response, 'Buddy could not answer that question'),
+        unwrapChatData(response, 'KukuNotes could not answer that question'),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'ChatSessions', id: 'LIST' },
         ...(arg.chatId ? [{ type: 'ChatMessages' as const, id: arg.chatId }] : []),
@@ -131,6 +139,14 @@ export const chatApi = api.injectEndpoints({
         'Spaces',
         'Profile',
         { type: 'CalendarFeed', id: 'LIST' },
+        ...(arg.meetingId
+          ? [
+              { type: 'Meetings' as const, id: `${arg.meetingId}:tasks` },
+              { type: 'Meetings' as const, id: `${arg.meetingId}:notes` },
+              'SpaceTasks' as const,
+              'SpaceNotes' as const,
+            ]
+          : []),
       ],
     }),
   }),

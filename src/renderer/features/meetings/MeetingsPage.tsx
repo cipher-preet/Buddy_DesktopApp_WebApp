@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import {
   FiAlertCircle,
   FiCalendar,
@@ -17,6 +17,7 @@ import {
 
 import { useAppSelector } from '@/app/hooks';
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
+import type { MeetingDetailTab, MeetingFocusTarget } from '@/features/search/searchTypes';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 import { useAssignMeetingSpaceMutation, useGetMeetingsInfiniteQuery } from '@/services/meetingsApi';
 
@@ -120,11 +121,31 @@ const MeetingSpaceMenu = ({
 }: MeetingSpaceMenuProps) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const [query, setQuery] = useState('');
+  const [alignEnd, setAlignEnd] = useState(false);
   const isAssigning = Boolean(pendingSpaceId);
 
   onCloseRef.current = onClose;
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setAlignEnd(false);
+      return;
+    }
+
+    const anchor = menuRef.current;
+    const popover = popoverRef.current;
+    if (!anchor || !popover) {
+      return;
+    }
+
+    const boundary = anchor.closest('.meetings-grid') ?? document.documentElement;
+    const boundaryRight = Math.min(boundary.getBoundingClientRect().right, window.innerWidth);
+    const anchorLeft = anchor.getBoundingClientRect().left;
+    setAlignEnd(anchorLeft + popover.offsetWidth > boundaryRight - 8);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -191,7 +212,8 @@ const MeetingSpaceMenu = ({
 
       {isOpen ? (
         <div
-          className="meeting-space-popover"
+          ref={popoverRef}
+          className={`meeting-space-popover${alignEnd ? ' is-align-end' : ''}`}
           role="dialog"
           aria-label={`Associate ${meetingTitle} with spaces`}
           onClick={(event) => event.stopPropagation()}
@@ -302,10 +324,25 @@ const MeetingSpaceMenu = ({
   );
 };
 
-export const MeetingsPage = () => {
+type MeetingsPageProps = {
+  focusTarget?: MeetingFocusTarget | null;
+  onFocusTargetHandled?: () => void;
+};
+
+export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: MeetingsPageProps) => {
   const userId = useAppSelector((state) => state.auth.user?.userId);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => focusTarget?.meetingId ?? null);
+  const [detailTab, setDetailTab] = useState<MeetingDetailTab | undefined>(() => focusTarget?.tab);
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+    setSelectedId(focusTarget.meetingId);
+    setDetailTab(focusTarget.tab);
+    onFocusTargetHandled?.();
+  }, [focusTarget, onFocusTargetHandled]);
   const [menuMeetingId, setMenuMeetingId] = useState<string | null>(null);
   const [filterSpaceId, setFilterSpaceId] = useState<string | null>(null);
   const [meetingSpaceIds, setMeetingSpaceIds] = useState<Record<string, string[]>>({});
@@ -652,11 +689,18 @@ export const MeetingsPage = () => {
 
   if (selectedId) {
     return (
-      <MeetingDetailView
-        meetingId={selectedId}
-        preview={selectedMeeting}
-        onBack={() => setSelectedId(null)}
-      />
+      <div className="meeting-detail-host">
+        <MeetingDetailView
+          key={`${selectedId}:${detailTab ?? 'summary'}`}
+          meetingId={selectedId}
+          preview={selectedMeeting}
+          initialTab={detailTab}
+          onBack={() => {
+            setSelectedId(null);
+            setDetailTab(undefined);
+          }}
+        />
+      </div>
     );
   }
 
@@ -882,7 +926,7 @@ export const MeetingsPage = () => {
           <p>
             {filterSpaceId
               ? `Nothing is associated with ${filterSpaceName || 'this space'} yet. Associate a meeting from the card menu, or clear the filter.`
-              : 'Recordings from your Buddy meeting extension will show up here.'}
+              : 'Recordings from your KukuNotes meeting extension will show up here.'}
           </p>
           {filterSpaceId ? (
             <button type="button" className="home-retry-button" onClick={resetSpaceFilter}>

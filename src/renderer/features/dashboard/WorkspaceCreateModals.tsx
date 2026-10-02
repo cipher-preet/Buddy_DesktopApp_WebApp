@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { FiCalendar, FiEdit3, FiFileText, FiFolder, FiFlag, FiX } from 'react-icons/fi';
+import { FiCalendar, FiEdit3, FiFileText, FiFolder, FiFlag, FiTrash2, FiX } from 'react-icons/fi';
 
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import {
   CustomDropdown,
   TextInput,
@@ -534,50 +535,15 @@ export const ConfirmDeleteModal = ({
   onClose,
   onConfirm,
 }: ConfirmDeleteModalProps) => (
-  <div
-    className="settings-modal-backdrop"
-    role="presentation"
-    onClick={() => {
-      if (!isSubmitting) {
-        onClose();
-      }
-    }}
-  >
-    <div
-      className="settings-modal settings-action-modal home-create-modal"
-      role="dialog"
-      aria-label={title}
-      aria-busy={isSubmitting}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <header>
-        <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
-          <FiX aria-hidden="true" size={18} />
-        </button>
-      </header>
-
-      <div className="settings-modal-actions">
-        <button
-          className="settings-secondary-button"
-          type="button"
-          onClick={onClose}
-          disabled={isSubmitting}
-        >
-          Cancel
-        </button>
-        <button
-          className="settings-primary-button settings-primary-button--danger"
-          type="button"
-          onClick={() => void onConfirm()}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? 'Deleting…' : confirmLabel}
-        </button>
-      </div>
-    </div>
-  </div>
+  <ConfirmDialog
+    tone="danger"
+    icon={<FiTrash2 />}
+    title={title}
+    description={description}
+    confirmLabel={confirmLabel}
+    pendingLabel="Deleting…"
+    isPending={isSubmitting}
+    onCancel={onClose}
+    onConfirm={onConfirm}
+  />
 );

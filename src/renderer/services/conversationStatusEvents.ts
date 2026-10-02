@@ -21,6 +21,8 @@ type SubscribeParams = {
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
 const SSE_RECORD_SEPARATOR = /\r?\n\r?\n/;
+const RECONNECT_MIN_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
 
 const readString = (value: unknown) =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
@@ -154,7 +156,11 @@ export const subscribeToConversationStatusEvents = ({
     }
   };
 
-  const run = async () => {
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = RECONNECT_MIN_MS;
+
+  const connect = async (): Promise<boolean> => {
+    let received = false;
     try {
       const authToken = token || getStoredAuthToken();
       const response = await fetch(buildEventsUrl(userId, spaceId), {
@@ -173,12 +179,14 @@ export const subscribeToConversationStatusEvents = ({
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
+      buffer = '';
 
       while (!closed) {
         const { done, value } = await reader.read();
         if (done) {
           break;
         }
+        received = true;
         buffer += decoder.decode(value, { stream: true });
         processBuffer();
       }
@@ -187,12 +195,24 @@ export const subscribeToConversationStatusEvents = ({
         onError?.(error);
       }
     }
+    return received;
+  };
+
+  // Hosting proxies (e.g. Vercel rewrites) end long-lived streams, so keep reconnecting.
+  const run = async () => {
+    const healthy = await connect();
+    if (closed) {
+      return;
+    }
+    retryDelay = healthy ? RECONNECT_MIN_MS : Math.min(retryDelay * 2, RECONNECT_MAX_MS);
+    retryTimer = setTimeout(() => void run(), retryDelay);
   };
 
   void run();
 
   return () => {
     closed = true;
+    clearTimeout(retryTimer);
     controller.abort();
   };
 };

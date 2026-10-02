@@ -5,9 +5,7 @@ import {
   FiChevronsLeft,
   FiChevronsRight,
   FiDownload,
-  FiList,
   FiMenu,
-  FiSearch,
   FiShare2,
   FiX,
 } from 'react-icons/fi';
@@ -16,11 +14,14 @@ import { RiMic2Line, RiRobot2Line } from 'react-icons/ri';
 import { useRecording } from '@/app/RecordingProvider';
 import { useAppSelector } from '@/app/hooks';
 import { BrandLogo } from '@/components/common/BrandLogo';
+import { GlobalSearch } from '@/components/layout/GlobalSearch';
 import { NotificationsDropdown } from '@/components/layout/NotificationsDropdown';
 import { SidePanelContent, type SidePanelTab } from '@/components/layout/SidePanelContent';
 import { StartListeningModal } from '@/components/recording/StartListeningModal';
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
+import type { SearchNavigationTarget } from '@/features/search/searchTypes';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
+import { useGetNotificationsQuery } from '@/services/notificationsApi';
 import { useGetPlanStatusQuery } from '@/services/plansApi';
 
 export type NavigationItem = {
@@ -35,16 +36,17 @@ type AppLayoutProps = {
   navigationItems: NavigationItem[];
   viewMode?: 'default' | 'chat' | 'wide';
   onOpenSettings?: () => void;
+  onSearchNavigate?: (target: SearchNavigationTarget) => void;
 };
 
 const panelTabs: { id: SidePanelTab; label: string }[] = [
   { id: 'ai-chat', label: 'AI Chat' },
-  { id: 'meetings', label: 'Meetings' },
   { id: 'share', label: 'Share' },
 ];
 
 const DRAWER_BREAKPOINT = 900;
-const PANEL_OVERLAY_BREAKPOINT = 1100;
+const PANEL_OVERLAY_BREAKPOINT = 1440;
+const NOTIFICATIONS_POLL_MS = 30_000;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
@@ -92,6 +94,7 @@ export const AppLayout = ({
   navigationItems,
   viewMode = 'default',
   onOpenSettings,
+  onSearchNavigate,
 }: AppLayoutProps) => {
   const { openPlanUpgrade, promptPlanUpgrade } = usePlanGate();
   const authUser = useAppSelector((state) => state.auth.user);
@@ -125,14 +128,21 @@ export const AppLayout = ({
     return 'Premium benefits active';
   }, [isFreePlan, planStatus?.plan?.features]);
 
-  const [isMeetingPanelCollapsed, setIsMeetingPanelCollapsed] = useState(false);
+  const [isMeetingPanelCollapsed, setIsMeetingPanelCollapsed] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDrawerViewport, setIsDrawerViewport] = useState(false);
   const [isListeningPickerOpen, setIsListeningPickerOpen] = useState(false);
-  const [activePanelTab, setActivePanelTab] = useState<SidePanelTab>('meetings');
+  const [activePanelTab, setActivePanelTab] = useState<SidePanelTab>('ai-chat');
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
+  const { data: notificationFeed } = useGetNotificationsQuery('all', {
+    skip: !userId,
+    pollingInterval: NOTIFICATIONS_POLL_MS,
+    skipPollingIfUnfocused: true,
+    refetchOnFocus: true,
+  });
+  const unreadNotifications = notificationFeed?.unreadCount ?? 0;
   const { startListening, isStarting, isVisible: isRecordingVisible } = useRecording();
   const isChatView = viewMode === 'chat';
   const hideSidePanel = viewMode === 'chat' || viewMode === 'wide';
@@ -282,17 +292,28 @@ export const AppLayout = ({
                 ref={notificationsButtonRef}
                 className={`nav-icon-button${isNotificationsOpen ? ' is-active' : ''}`}
                 type="button"
-                aria-label="Notifications"
+                aria-label={
+                  unreadNotifications > 0 ? `Notifications, ${unreadNotifications} unread` : 'Notifications'
+                }
                 aria-expanded={isNotificationsOpen}
                 aria-haspopup="dialog"
                 onClick={() => setIsNotificationsOpen((open) => !open)}
               >
                 <FiBell aria-hidden="true" size={18} />
+                {unreadNotifications > 0 ? (
+                  <span className="nav-icon-button__badge" aria-hidden="true">
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                  </span>
+                ) : null}
               </button>
               <NotificationsDropdown
                 isOpen={isNotificationsOpen}
                 onClose={() => setIsNotificationsOpen(false)}
                 anchorRef={notificationsButtonRef}
+                onNavigate={(target) => {
+                  setIsMobileNavOpen(false);
+                  onSearchNavigate?.(target);
+                }}
               />
             </div>
           </div>
@@ -309,7 +330,7 @@ export const AppLayout = ({
               {(authUser?.name || authUser?.email || 'B').charAt(0).toUpperCase()}
             </span>
             <span className="account-card__text">
-              <strong>{authUser?.name || 'Buddy User'}</strong>
+              <strong>{authUser?.name || 'KukuNotes User'}</strong>
               <small>{authUser?.email || authUser?.phone || 'No email added'}</small>
             </span>
           </button>
@@ -368,7 +389,7 @@ export const AppLayout = ({
               disabled={isPlanStatusLoading}
               onClick={() => openPlanUpgrade()}
             >
-              {isFreePlan ? 'Get Buddy Pro' : 'Manage plan'}
+              {isFreePlan ? 'Get KukuNotes Pro' : 'Manage plan'}
             </button>
           </div>
         </div>
@@ -391,11 +412,13 @@ export const AppLayout = ({
                 <FiMenu aria-hidden="true" size={20} />
               </button>
 
-              <label className="search-field">
-                <FiSearch aria-hidden="true" size={21} />
-                <input placeholder="Ask or search" aria-label="Ask or search" />
-                <kbd>CtrlK</kbd>
-              </label>
+              <GlobalSearch
+                onNavigate={(target) => {
+                  setIsMobileNavOpen(false);
+                  setIsNotificationsOpen(false);
+                  onSearchNavigate?.(target);
+                }}
+              />
             </div>
 
             <div className="header-actions">
@@ -476,7 +499,7 @@ export const AppLayout = ({
                 </div>
 
                 <div className="meeting-panel__content" data-tab={activePanelTab}>
-                  <SidePanelContent activeTab={activePanelTab} onStartRecording={openListeningPicker} />
+                  <SidePanelContent activeTab={activePanelTab} />
                 </div>
               </aside>
             </>
@@ -490,9 +513,6 @@ export const AppLayout = ({
             >
               <button type="button" aria-label="Open AI chat panel" onClick={() => openPanel('ai-chat')}>
                 <RiRobot2Line aria-hidden="true" size={18} />
-              </button>
-              <button type="button" aria-label="Open meetings panel" onClick={() => openPanel('meetings')}>
-                <FiList aria-hidden="true" size={18} />
               </button>
               <button type="button" aria-label="Open share panel" onClick={() => openPanel('share')}>
                 <FiShare2 aria-hidden="true" size={18} />

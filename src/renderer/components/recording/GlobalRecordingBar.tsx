@@ -64,7 +64,7 @@ export const GlobalRecordingBar = ({ onOpenPlans: _onOpenPlans }: { onOpenPlans?
 
   const detailLabel = isUploading
     ? `${pendingUploads} chunk${pendingUploads === 1 ? '' : 's'}`
-    : session?.spaceName || 'Buddy';
+    : session?.spaceName || 'KukuNotes';
 
   return (
     <div className="global-recording-layer" aria-live="polite">

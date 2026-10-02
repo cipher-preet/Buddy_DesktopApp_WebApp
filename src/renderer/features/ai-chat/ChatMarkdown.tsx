@@ -118,7 +118,7 @@ export const ChatMarkdown = ({ content }: { content: string }) => {
   if (!blocks.length) {
     return (
       <div className="assistant-message">
-        <p>Buddy did not return a response.</p>
+        <p>KukuNotes did not return a response.</p>
       </div>
     );
   }

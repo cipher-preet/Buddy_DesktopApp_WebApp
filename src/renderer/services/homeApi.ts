@@ -207,6 +207,7 @@ export const homeApi = api.injectEndpoints({
         { type: 'SpaceTasks', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
         'Profile',
+        'Notifications',
       ],
     }),
     createStagedNote: builder.mutation<
@@ -224,6 +225,7 @@ export const homeApi = api.injectEndpoints({
         { type: 'SpaceNotes', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
         'Profile',
+        'Notifications',
       ],
     }),
     updateSpace: builder.mutation<
@@ -303,7 +305,7 @@ export const homeApi = api.injectEndpoints({
         }
         return { message: 'Space deleted successfully.' };
       },
-      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Profile', 'SpaceTasks', 'SpaceNotes'],
+      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Profile', 'SpaceTasks', 'SpaceNotes', 'Notifications'],
     }),
     deleteStagedTask: builder.mutation<
       { message?: string },
@@ -325,6 +327,7 @@ export const homeApi = api.injectEndpoints({
         { type: 'SpaceTasks', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
         'Profile',
+        'Notifications',
       ],
     }),
     deleteStagedNote: builder.mutation<
@@ -347,6 +350,7 @@ export const homeApi = api.injectEndpoints({
         { type: 'SpaceNotes', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
         'Profile',
+        'Notifications',
       ],
     }),
     setStagedTaskStatus: builder.mutation<

@@ -20,6 +20,7 @@ import {
 } from 'react-icons/fi';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useToast } from '@/app/ToastProvider';
 import { setUnauthenticated, updateAuthUser } from '@/features/auth/authSlice';
 import {
@@ -65,7 +66,7 @@ type CustomDropdownProps = {
 const feedbackTopics: OptionItem[] = [
   { id: 'app_bug', label: 'Something is wrong with the app' },
   { id: 'reminder_issue', label: 'Issue with reminders or alerts' },
-  { id: 'ai_issue', label: 'Buddy AI is not working right' },
+  { id: 'ai_issue', label: 'KukuNotes AI is not working right' },
   { id: 'billing', label: 'Billing or plan question' },
   { id: 'other', label: 'Other feedback' },
 ];
@@ -184,7 +185,7 @@ export const SettingsPage = ({
   const [supportError, setSupportError] = useState('');
   const [ticketId, setTicketId] = useState('');
   const [profile, setProfile] = useState({
-    name: authUser?.name || 'Buddy User',
+    name: authUser?.name || 'KukuNotes User',
     email: authUser?.email || '',
     phone: authUser?.phone ? String(authUser.phone) : '',
   });
@@ -245,7 +246,7 @@ export const SettingsPage = ({
 
   useEffect(() => {
     const nextProfile = {
-      name: authUser?.name || 'Buddy User',
+      name: authUser?.name || 'KukuNotes User',
       email: authUser?.email || '',
       phone: authUser?.phone ? String(authUser.phone) : '',
     };
@@ -395,7 +396,7 @@ export const SettingsPage = ({
   };
 
   const openSupportEmail = () => {
-    window.location.href = `mailto:${supportEmail}?subject=${encodeURIComponent('Buddy Support Request')}`;
+    window.location.href = `mailto:${supportEmail}?subject=${encodeURIComponent('KukuNotes Support Request')}`;
   };
 
   const submitTicket = async () => {
@@ -412,7 +413,7 @@ export const SettingsPage = ({
         message: supportMessage.trim(),
       }).unwrap();
 
-      setTicketId(response.data?.ticketId ?? 'BUDDY-' + new Date().getTime().toString().slice(-6));
+      setTicketId(response.data?.ticketId ?? 'KUKU-' + new Date().getTime().toString().slice(-6));
       setSupportStep('success');
     } catch (error) {
       setSupportError(getApiErrorMessage(error, 'Unable to raise ticket. Please try again.'));
@@ -435,7 +436,7 @@ export const SettingsPage = ({
     },
     {
       title: 'Feedback',
-      subtitle: 'Tell us how we can improve Buddy',
+      subtitle: 'Tell us how we can improve KukuNotes',
       icon: FiMessageSquare,
       action: 'feedback',
     },
@@ -620,7 +621,7 @@ export const SettingsPage = ({
             <header>
               <div>
                 <h2>Edit Profile</h2>
-                <p>Keep your Buddy profile up to date.</p>
+                <p>Keep your KukuNotes profile up to date.</p>
               </div>
               <button type="button" onClick={() => setIsEditOpen(false)} aria-label="Close" disabled={isSavingProfile}>
                 ×
@@ -676,7 +677,7 @@ export const SettingsPage = ({
                 <header>
                   <div>
                     <h2>Thank you for the feedback</h2>
-                    <p>Your note has been sent to the Buddy team. We use this to improve the product experience.</p>
+                    <p>Your note has been sent to the KukuNotes team. We use this to improve the product experience.</p>
                   </div>
                   <button type="button" onClick={closeFeedback} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
@@ -747,7 +748,7 @@ export const SettingsPage = ({
                 <header>
                   <div>
                     <h2>Help & Support</h2>
-                    <p>Email us directly or raise a ticket for the Buddy team.</p>
+                    <p>Email us directly or raise a ticket for the KukuNotes team.</p>
                   </div>
                   <button type="button" onClick={closeSupport} aria-label="Close">
                     <FiX aria-hidden="true" size={18} />
@@ -778,7 +779,7 @@ export const SettingsPage = ({
                   </span>
                   <span>
                     <strong>Raise a ticket</strong>
-                    <small>Trackable request for the Buddy team</small>
+                    <small>Trackable request for the KukuNotes team</small>
                   </span>
                   <FiArrowRight aria-hidden="true" size={16} />
                 </button>
@@ -882,125 +883,61 @@ export const SettingsPage = ({
       ) : null}
 
       {isLogoutOpen ? (
-        <div
-          className="settings-modal-backdrop"
-          role="presentation"
-          onClick={() => {
-            if (!isLoggingOut) {
-              setIsLogoutOpen(false);
-              setSessionError('');
-            }
+        <ConfirmDialog
+          icon={<FiLogOut />}
+          title="Log out of KukuNotes?"
+          description="You can sign back in anytime with the same account. Your spaces and data stay safe."
+          confirmLabel="Log out"
+          pendingLabel="Logging out…"
+          isPending={isLoggingOut}
+          error={sessionError}
+          onCancel={() => {
+            setIsLogoutOpen(false);
+            setSessionError('');
           }}
-        >
-          <div
-            className="settings-confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="logout-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="settings-confirm-dialog__icon" aria-hidden="true">
-              <FiLogOut size={22} />
-            </div>
-            <div className="settings-confirm-dialog__content">
-              <h2 id="logout-confirm-title">Log out of Buddy?</h2>
-              <p>You can sign back in anytime with the same account. Your spaces and data stay safe.</p>
-            </div>
-            {sessionError ? <p className="settings-form-error">{sessionError}</p> : null}
-            <div className="settings-confirm-dialog__actions">
-              <button
-                className="settings-secondary-button"
-                type="button"
-                onClick={() => {
-                  setIsLogoutOpen(false);
-                  setSessionError('');
-                }}
-                disabled={isLoggingOut}
-              >
-                Cancel
-              </button>
-              <button
-                className="settings-primary-button"
-                type="button"
-                onClick={() => void handleLogout()}
-                disabled={isLoggingOut}
-              >
-                {isLoggingOut ? 'Logging out…' : 'Log out'}
-              </button>
-            </div>
-          </div>
-        </div>
+          onConfirm={handleLogout}
+        />
       ) : null}
 
       {isDeleteOpen ? (
-        <div
-          className="settings-modal-backdrop"
-          role="presentation"
-          onClick={() => {
-            if (!isDeletingAccount) {
-              setIsDeleteOpen(false);
-              setDeleteText('');
-              setSessionError('');
-            }
+        <ConfirmDialog
+          tone="danger"
+          icon={<FiTrash2 />}
+          title="Delete your account?"
+          description="This permanently removes your spaces, notes, tasks, and recordings. This can’t be undone."
+          confirmLabel="Delete account"
+          pendingLabel="Deleting…"
+          isPending={isDeletingAccount}
+          confirmDisabled={deleteText !== 'DELETE'}
+          error={sessionError}
+          onCancel={() => {
+            setIsDeleteOpen(false);
+            setDeleteText('');
+            setSessionError('');
           }}
+          onConfirm={handleDeleteAccount}
         >
-          <div
-            className="settings-confirm-dialog settings-confirm-dialog--danger"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="settings-confirm-dialog__icon settings-confirm-dialog__icon--danger" aria-hidden="true">
-              <FiTrash2 size={22} />
-            </div>
-            <div className="settings-confirm-dialog__content">
-              <h2 id="delete-confirm-title">Delete your account?</h2>
-              <p>
-                This permanently removes your spaces, notes, tasks, and recordings. This action cannot be undone.
-              </p>
-            </div>
-            <div className="settings-confirm-dialog__warning">
-              <strong>Before you continue</strong>
-              <span>Type <em>DELETE</em> below to confirm you understand this is permanent.</span>
-            </div>
-            <label className="settings-confirm-dialog__field" htmlFor="delete-confirm">
-              Confirmation
-              <input
-                id="delete-confirm"
-                value={deleteText}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Type DELETE"
-                onChange={(event) => setDeleteText(event.target.value)}
-                disabled={isDeletingAccount}
-              />
-            </label>
-            {sessionError ? <p className="settings-form-error">{sessionError}</p> : null}
-            <div className="settings-confirm-dialog__actions">
-              <button
-                className="settings-secondary-button"
-                type="button"
-                disabled={isDeletingAccount}
-                onClick={() => {
-                  setIsDeleteOpen(false);
-                  setDeleteText('');
-                  setSessionError('');
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="settings-primary-button settings-primary-button--danger"
-                type="button"
-                disabled={deleteText !== 'DELETE' || isDeletingAccount}
-                onClick={() => void handleDeleteAccount()}
-              >
-                {isDeletingAccount ? 'Deleting…' : 'Delete account'}
-              </button>
-            </div>
-          </div>
-        </div>
+          <label className="confirm-dialog__field" htmlFor="delete-confirm">
+            <span>
+              Type <code>DELETE</code> to confirm
+            </span>
+            <input
+              id="delete-confirm"
+              data-autofocus
+              value={deleteText}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="DELETE"
+              onChange={(event) => setDeleteText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && deleteText === 'DELETE' && !isDeletingAccount) {
+                  void handleDeleteAccount();
+                }
+              }}
+              disabled={isDeletingAccount}
+            />
+          </label>
+        </ConfirmDialog>
       ) : null}
     </section>
   );

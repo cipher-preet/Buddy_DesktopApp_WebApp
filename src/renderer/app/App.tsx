@@ -21,6 +21,12 @@ import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
 import { MeetingsPage } from '@/features/meetings/MeetingsPage';
 import { PlanGateProvider } from '@/features/settings/PlanGateProvider';
 import { SettingsPage } from '@/features/settings/SettingsPage';
+import type {
+  CalendarFocusTarget,
+  DashboardFocusTarget,
+  MeetingFocusTarget,
+  SearchNavigationTarget,
+} from '@/features/search/searchTypes';
 import { useLazyCheckAuthQuery, api } from '@/services/api';
 
 type AppRoute = 'home' | 'ai-chat' | 'meetings' | 'calendar' | 'integrations' | 'settings';
@@ -33,7 +39,30 @@ export const App = () => {
   const [activeRoute, setActiveRoute] = useState<AppRoute>('home');
   const [homeSectionFocus, setHomeSectionFocus] = useState<HomeSectionFocus | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocus>(null);
+  const [dashboardTarget, setDashboardTarget] = useState<DashboardFocusTarget | null>(null);
+  const [meetingTarget, setMeetingTarget] = useState<MeetingFocusTarget | null>(null);
+  const [calendarTarget, setCalendarTarget] = useState<CalendarFocusTarget | null>(null);
   const [checkAuth] = useLazyCheckAuthQuery();
+
+  const handleSearchNavigate = (target: SearchNavigationTarget) => {
+    const nonce = Date.now();
+    if (target.kind === 'meeting') {
+      setMeetingTarget({ meetingId: target.meetingId, tab: target.tab, nonce });
+      setActiveRoute('meetings');
+      return;
+    }
+    if (target.kind === 'event') {
+      setCalendarTarget({ dateKey: target.dateKey, nonce });
+      setActiveRoute('calendar');
+      return;
+    }
+    setDashboardTarget(
+      target.kind === 'space'
+        ? { spaceId: target.spaceId, nonce }
+        : { spaceId: target.spaceId, section: target.kind === 'task' ? 'tasks' : 'notes', itemId: target.itemId, nonce },
+    );
+    setActiveRoute('home');
+  };
 
   const goHome = (section?: HomeSectionFocus) => {
     setHomeSectionFocus(section ?? 'spaces');
@@ -133,7 +162,7 @@ export const App = () => {
   if (authStatus === 'bootstrapping') {
     return (
       <div className="app-boot-screen" role="status" aria-live="polite">
-        <p>Connecting to Buddy…</p>
+        <p>Connecting to KukuNotes…</p>
       </div>
     );
   }
@@ -154,11 +183,13 @@ export const App = () => {
       <DashboardPage
         focusSection={homeSectionFocus}
         onFocusHandled={() => setHomeSectionFocus(null)}
+        focusTarget={dashboardTarget}
+        onFocusTargetHandled={() => setDashboardTarget(null)}
       />
     ),
     'ai-chat': <AiChatPage />,
-    meetings: <MeetingsPage />,
-    calendar: <CalendarPage />,
+    meetings: <MeetingsPage focusTarget={meetingTarget} onFocusTargetHandled={() => setMeetingTarget(null)} />,
+    calendar: <CalendarPage focusTarget={calendarTarget} onFocusTargetHandled={() => setCalendarTarget(null)} />,
     integrations: <IntegrationsPage />,
     settings: (
       <SettingsPage
@@ -180,6 +211,7 @@ export const App = () => {
           navigationItems={navigationItems}
           viewMode={activeRoute === 'ai-chat' ? 'chat' : activeRoute === 'meetings' ? 'wide' : 'default'}
           onOpenSettings={() => setActiveRoute('settings')}
+          onSearchNavigate={handleSearchNavigate}
         >
           {page}
         </AppLayout>

@@ -21,6 +21,7 @@ import {
   getCalendarErrorMessage,
   minutesToApiTimeLabel,
 } from '@/features/calendar/calendarMappers';
+import type { CalendarFocusTarget } from '@/features/search/searchTypes';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import type {
   CalendarDayItem,
@@ -178,7 +179,12 @@ const EventChip = ({ event, compact = false }: { event: CalendarEvent; compact?:
   );
 };
 
-export const CalendarPage = () => {
+type CalendarPageProps = {
+  focusTarget?: CalendarFocusTarget | null;
+  onFocusTargetHandled?: () => void;
+};
+
+export const CalendarPage = ({ focusTarget = null, onFocusTargetHandled }: CalendarPageProps) => {
   const { showToast } = useToast();
   const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
@@ -206,6 +212,20 @@ export const CalendarPage = () => {
   const [startTimeMenuOpen, setStartTimeMenuOpen] = useState(false);
   const [endTimeMenuOpen, setEndTimeMenuOpen] = useState(false);
   const [nowTick, setNowTick] = useState(() => nowMinutes());
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+    const target = parseDateKey(focusTarget.dateKey);
+    if (!Number.isNaN(target.getTime())) {
+      target.setHours(12, 0, 0, 0);
+      setCursorDate(new Date(target));
+      setSelectedDate(target);
+      setView('day');
+    }
+    onFocusTargetHandled?.();
+  }, [focusTarget, onFocusTargetHandled]);
 
   const closeFormMenus = () => {
     setDateMenuOpen(false);
@@ -1123,7 +1143,11 @@ const DayActivityPanel = ({
                     <time>{formatTimeRange(event.startMinutes, event.endMinutes)}</time>
                   </div>
                   {event.description ? <p>{event.description}</p> : null}
-                  {event.spaceName ? <small>{event.spaceName}</small> : null}
+                  {event.provider === 'google' ? (
+                    <small>Google Calendar</small>
+                  ) : event.spaceName ? (
+                    <small>{event.spaceName}</small>
+                  ) : null}
                   {event.attendees?.length ? <AttendeeStack attendees={event.attendees} /> : null}
                 </article>
               );
@@ -1151,9 +1175,10 @@ const DayActivityPanel = ({
                     <h3>
                       <span aria-hidden="true">{meta.icon}</span> {event.title}
                     </h3>
-                    <time>{minutesToLabel(event.startMinutes)}</time>
+                    <time>{event.allDay ? 'All day' : minutesToLabel(event.startMinutes)}</time>
                   </div>
                   {event.description ? <p>{event.description}</p> : null}
+                  {event.provider === 'google' ? <small>Google Calendar</small> : null}
                 </article>
               );
             })}
@@ -1210,7 +1235,10 @@ const DayTimeline = ({
                 {!isBlock ? <span aria-hidden="true">{meta.icon}</span> : null}
                 <div>
                   <h3>{event.title}</h3>
-                  <p>{event.description || formatTimeRange(event.startMinutes, event.endMinutes)}</p>
+                  <p>
+                    {event.description ||
+                      (event.allDay ? 'All day' : formatTimeRange(event.startMinutes, event.endMinutes))}
+                  </p>
                   {isBlock ? <small>{formatTimeRange(event.startMinutes, event.endMinutes)}</small> : null}
                 </div>
               </div>

@@ -9,4 +9,8 @@
 @import './layout.css';
 @import './components.css';
 @import './pages.css';
+@import './dashboard.css';
+@import './share.css';
+@import './search.css';
 @import './recording.css';
+@import './confirm-dialog.css';

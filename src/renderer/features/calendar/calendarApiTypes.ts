@@ -31,6 +31,9 @@ export type CalendarFeedItemDto = {
   aiReminder?: boolean;
   remindBeforeMinutes?: number;
   reminderId?: string | null;
+  provider?: 'google' | null;
+  allDay?: boolean;
+  externalUrl?: string | null;
 };
 
 export type CalendarFeedSpaceDto = {

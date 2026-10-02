@@ -7,7 +7,8 @@ export type EventCategory =
   | 'launch'
   | 'meeting'
   | 'interview'
-  | 'onboarding';
+  | 'onboarding'
+  | 'allday';
 
 export type DayItemKind = 'task' | 'note' | 'reminder';
 
@@ -31,6 +32,9 @@ export type CalendarEvent = {
   canJoin?: boolean;
   source?: 'calendar_event' | 'conversation' | string;
   spaceName?: string | null;
+  provider?: 'google' | null;
+  allDay?: boolean;
+  externalUrl?: string | null;
 };
 
 export type CalendarDayItem = {

@@ -39,7 +39,7 @@ const mediaErrorMessage = (code: number) => {
     case 2:
       return 'Network error while loading the recording. Make sure the API server is running, then Retry.';
     case 3:
-      return 'This recording looks incomplete or corrupted — often caused by missing upload chunks during save.';
+      return 'This recording could not be decoded. Try Retry, or reopen the meeting.';
     case 4:
       return 'This recording format could not be played in the app.';
     default:
@@ -47,11 +47,39 @@ const mediaErrorMessage = (code: number) => {
   }
 };
 
+/** First jump past a damaged region; doubles while the player keeps failing at the same spot. */
+const DAMAGE_SKIP_SECONDS = 2;
+const DAMAGE_SKIP_MAX_STEP_SECONDS = 30;
+const DAMAGE_SKIP_MAX_ATTEMPTS = 60;
+const NETWORK_RETRY_MAX_ATTEMPTS = 3;
+const FREEZE_FRAME_MAX_MS = 15_000;
+const RESUME_STEADY_SECONDS = 0.75;
+const DEFAULT_VIDEO_ASPECT = 16 / 9;
+
+type DamageSkipState = { resumeAt: number | null; step: number; attempts: number };
+type PendingResume = { at: number; autoplay: boolean };
+/** `skipping`: last good frame shown while jumping a damaged region. `ended`: damaged tail, shown as finished. */
+type FreezeMode = 'skipping' | 'ended' | null;
+
+const initialDamageSkipState = (): DamageSkipState => ({ resumeAt: null, step: DAMAGE_SKIP_SECONDS, attempts: 0 });
+
+const formatPlayerTime = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '0:00';
+  }
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = String(total % 60).padStart(2, '0');
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${secs}` : `${minutes}:${secs}`;
+};
+
 type DetailTab = 'summary' | 'transcript' | 'tasks' | 'notes';
 
 type MeetingDetailViewProps = {
   meetingId: string;
   preview?: MeetingListItem | null;
+  initialTab?: DetailTab;
   onBack: () => void;
 };
 
@@ -141,8 +169,8 @@ const SectionLoading = ({ label }: { label: string }) => (
   </div>
 );
 
-export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailViewProps) => {
-  const [activeTab, setActiveTab] = useState<DetailTab>('summary');
+export const MeetingDetailView = ({ meetingId, preview, initialTab, onBack }: MeetingDetailViewProps) => {
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? 'summary');
   const [shouldPoll, setShouldPoll] = useState(() => preview?.ready === false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [activeTranscriptId, setActiveTranscriptId] = useState<string | null>(null);
@@ -157,11 +185,59 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
   const sourceModeRef = useRef<'signed' | 'stream'>('signed');
   const lockedSrcRef = useRef('');
   const [mediaSrc, setMediaSrc] = useState('');
+  const [skippedDamage, setSkippedDamage] = useState(false);
+  const durationRef = useRef(0);
+  const lastGoodTimeRef = useRef(0);
+  const damageSkipRef = useRef<DamageSkipState>(initialDamageSkipState());
+  const pendingResumeRef = useRef<PendingResume | null>(null);
+  const networkRetryRef = useRef(0);
+  const freezeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const freezeModeRef = useRef<FreezeMode>(null);
+  const freezeTimerRef = useRef<number | null>(null);
+  const [freezeMode, setFreezeModeState] = useState<FreezeMode>(null);
+  /** Locked player shape — reloads drop the intrinsic size, which would collapse the layout. */
+  const [videoAspect, setVideoAspect] = useState(DEFAULT_VIDEO_ASPECT);
+
+  const setFreezeMode = (mode: FreezeMode) => {
+    freezeModeRef.current = mode;
+    setFreezeModeState(mode);
+    if (freezeTimerRef.current) {
+      window.clearTimeout(freezeTimerRef.current);
+      freezeTimerRef.current = null;
+    }
+    if (mode === 'skipping') {
+      // Never leave the frozen frame stuck if the reload never reaches the resume point.
+      freezeTimerRef.current = window.setTimeout(() => {
+        freezeTimerRef.current = null;
+        if (freezeModeRef.current === 'skipping') {
+          freezeModeRef.current = null;
+          setFreezeModeState(null);
+        }
+      }, FREEZE_FRAME_MAX_MS);
+    }
+  };
+
+  useEffect(
+    () => () => {
+      if (freezeTimerRef.current) {
+        window.clearTimeout(freezeTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     setActiveTab('summary');
     setShouldPoll(preview?.ready === false);
     setMediaError(null);
+    setSkippedDamage(false);
+    freezeModeRef.current = null;
+    setFreezeModeState(null);
+    durationRef.current = 0;
+    lastGoodTimeRef.current = 0;
+    damageSkipRef.current = initialDamageSkipState();
+    pendingResumeRef.current = null;
+    networkRetryRef.current = 0;
     setActiveTranscriptId(null);
     setIsSeekBuffering(false);
     setLoadAttempt(0);
@@ -408,15 +484,162 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
     }, 12_000);
   };
 
+  /**
+   * Damaged/missing segments surface as a decode error mid-file. Reload the same source and
+   * resume just past the failure point instead of stopping playback.
+   */
+  /** Keep a copy of the latest decoded frame so reloads never flash black. */
+  const captureFrame = (video: HTMLVideoElement) => {
+    const canvas = freezeCanvasRef.current;
+    if (!canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth) {
+      return;
+    }
+    try {
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    } catch {
+      // Drawing is best-effort; the frozen layer just shows the previous frame.
+    }
+  };
+
+  const reloadAt = (video: HTMLVideoElement, resume: PendingResume) => {
+    pendingResumeRef.current = resume;
+    pendingSeekSecondsRef.current = null;
+    finishSeekBuffering();
+    video.load();
+  };
+
+  const resumePastDamage = (video: HTMLVideoElement) => {
+    const state = damageSkipRef.current;
+    if (state.attempts >= DAMAGE_SKIP_MAX_ATTEMPTS) {
+      return false;
+    }
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      durationRef.current = video.duration;
+    }
+    const duration = durationRef.current;
+    const failedAt = pendingSeekSecondsRef.current ?? lastGoodTimeRef.current;
+    const stuck = state.resumeAt != null && failedAt <= state.resumeAt + 1.5;
+    const step = stuck ? Math.min(state.step * 2, DAMAGE_SKIP_MAX_STEP_SECONDS) : DAMAGE_SKIP_SECONDS;
+    const base = stuck && state.resumeAt != null ? state.resumeAt : failedAt;
+    const tailIsDamaged = duration > 0 && base + step >= duration - 0.25;
+
+    setSkippedDamage(true);
+    setMediaError(null);
+
+    if (tailIsDamaged) {
+      // Nothing playable after the damage: finish on the last good frame instead of restarting.
+      damageSkipRef.current = initialDamageSkipState();
+      setFreezeMode('ended');
+      reloadAt(video, { at: lastGoodTimeRef.current, autoplay: false });
+      return true;
+    }
+
+    const resumeAt = base + step;
+    damageSkipRef.current = { resumeAt, step, attempts: state.attempts + 1 };
+    setFreezeMode('skipping');
+    reloadAt(video, { at: resumeAt, autoplay: true });
+    return true;
+  };
+
+  const handleLoadedMetadata = (video: HTMLVideoElement) => {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      durationRef.current = video.duration;
+    }
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      const aspect = video.videoWidth / video.videoHeight;
+      setVideoAspect((current) => (Math.abs(current - aspect) > 0.01 ? aspect : current));
+    }
+    const resume = pendingResumeRef.current;
+    if (!resume) {
+      return;
+    }
+    if (resume.at > 0.25) {
+      pendingSeekSecondsRef.current = resume.at;
+      try {
+        video.currentTime = resume.at;
+      } catch {
+        // Some containers reject seek until more data buffers.
+      }
+    }
+    if (resume.autoplay) {
+      void video.play().catch(() => undefined);
+    } else {
+      pendingResumeRef.current = null;
+    }
+  };
+
+  const handleTimeUpdate = (video: HTMLVideoElement) => {
+    const resume = pendingResumeRef.current;
+    if (resume) {
+      // Hold the frozen frame until playback is steady past the jump, so back-to-back
+      // damaged spots don't flash the frame on and off.
+      if (video.seeking || video.paused || video.currentTime < resume.at + RESUME_STEADY_SECONDS) {
+        return;
+      }
+      pendingResumeRef.current = null;
+      if (freezeModeRef.current === 'skipping') {
+        finishSeekBuffering();
+        setFreezeMode(null);
+      }
+    }
+    lastGoodTimeRef.current = video.currentTime;
+    if (!freezeModeRef.current) {
+      captureFrame(video);
+    }
+  };
+
+  const replayFromStart = () => {
+    const video = videoRef.current;
+    setFreezeMode(null);
+    damageSkipRef.current = initialDamageSkipState();
+    if (!video) {
+      return;
+    }
+    lastGoodTimeRef.current = 0;
+    if (video.error) {
+      reloadAt(video, { at: 0, autoplay: true });
+      return;
+    }
+    try {
+      video.currentTime = 0;
+    } catch {
+      // Ignore — play() below restarts from the current position.
+    }
+    void video.play().catch(() => undefined);
+  };
+
   const handlePlaybackMediaError = () => {
     const video = videoRef.current;
     const mediaCode = video?.error?.code ?? 0;
     // MEDIA_ERR_ABORTED (1) — remount / Range cancel. Never treat as a hard failure.
-    if (mediaCode === 1) {
+    if (mediaCode === 1 || !video) {
+      return;
+    }
+
+    if (freezeModeRef.current === 'ended' && mediaCode !== 2) {
+      return;
+    }
+
+    if (mediaCode !== 2 && resumePastDamage(video)) {
       return;
     }
 
     finishSeekBuffering();
+
+    if (mediaCode === 2 && networkRetryRef.current < NETWORK_RETRY_MAX_ATTEMPTS) {
+      networkRetryRef.current += 1;
+      pendingSeekSecondsRef.current = lastGoodTimeRef.current > 0.25 ? lastGoodTimeRef.current : null;
+      beginSeekBuffering();
+      window.setTimeout(() => {
+        setLoadAttempt((value) => value + 1);
+      }, 400 * networkRetryRef.current);
+      return;
+    }
+
     errorRetryRef.current += 1;
 
     // One automatic remount with the alternate source (signed ↔ stream). No retry-counter reset on canplay.
@@ -433,6 +656,10 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
 
   const retryPlayback = () => {
     errorRetryRef.current = 0;
+    networkRetryRef.current = 0;
+    damageSkipRef.current = initialDamageSkipState();
+    pendingResumeRef.current = null;
+    setFreezeMode(null);
     setMediaError(null);
     lockedSrcRef.current = '';
     loadedUrlRef.current = '';
@@ -542,7 +769,7 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
           <SectionLoading label="Loading meeting…" />
         </div>
         <aside className="meeting-ask" aria-label="AI Chat">
-          <AiChatView compact />
+          <AiChatView key={meetingId} compact meetingId={meetingId} />
         </aside>
       </section>
     );
@@ -564,7 +791,7 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
           />
         </div>
         <aside className="meeting-ask" aria-label="AI Chat">
-          <AiChatView compact />
+          <AiChatView key={meetingId} compact meetingId={meetingId} />
         </aside>
       </section>
     );
@@ -594,6 +821,7 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
                 key={`${meetingId}:${loadAttempt}`}
                 ref={videoRef}
                 className="meeting-player__video"
+                style={{ aspectRatio: videoAspect }}
                 src={mediaSrc}
                 controls
                 playsInline
@@ -601,6 +829,10 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
                 controlsList="nodownload"
                 onWaiting={() => setIsSeekBuffering(true)}
                 onSeeking={(event) => {
+                  if (!freezeModeRef.current) {
+                    // User scrub — drop any automatic resume target.
+                    pendingResumeRef.current = null;
+                  }
                   const next = event.currentTarget.currentTime;
                   if (Number.isFinite(next) && next > 0.2) {
                     pendingSeekSecondsRef.current = next;
@@ -630,6 +862,14 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
                     finishSeekBuffering();
                   }
                 }}
+                onLoadedMetadata={(event) => handleLoadedMetadata(event.currentTarget)}
+                onDurationChange={(event) => {
+                  const { duration } = event.currentTarget;
+                  if (Number.isFinite(duration) && duration > 0) {
+                    durationRef.current = duration;
+                  }
+                }}
+                onTimeUpdate={(event) => handleTimeUpdate(event.currentTarget)}
                 onLoadedData={() => {
                   finishSeekBuffering();
                 }}
@@ -638,13 +878,41 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
                 }}
                 onPlaying={() => {
                   setMediaError(null);
+                  networkRetryRef.current = 0;
                   finishSeekBuffering();
                 }}
                 onError={handlePlaybackMediaError}
               >
                 Sorry, your browser cannot play this recording.
               </video>
-              {isSeekBuffering && !mediaError ? (
+              <canvas
+                ref={freezeCanvasRef}
+                className={`meeting-player__freeze${freezeMode ? ' is-visible' : ''}${freezeMode === 'ended' ? ' is-ended' : ''}`}
+                aria-hidden="true"
+              />
+              {freezeMode === 'skipping' && !mediaError ? (
+                <div className="meeting-player__skip-pill" role="status" aria-live="polite">
+                  <span className="home-spinner" />
+                  Skipping damaged part…
+                </div>
+              ) : null}
+              {freezeMode === 'ended' && !mediaError ? (
+                <div className="meeting-player__ended" role="status">
+                  <button type="button" className="meeting-player__replay" onClick={replayFromStart}>
+                    <FiRefreshCw aria-hidden="true" size={16} />
+                    Replay
+                  </button>
+                  <div className="meeting-player__ended-bar">
+                    <span className="meeting-player__ended-track">
+                      <span className="meeting-player__ended-fill" />
+                    </span>
+                    <span className="meeting-player__ended-time">
+                      {formatPlayerTime(durationRef.current)} / {formatPlayerTime(durationRef.current)}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+              {isSeekBuffering && !mediaError && !freezeMode ? (
                 <div className="meeting-player__buffering" role="status" aria-live="polite">
                   <span className="home-spinner" />
                   <span>Buffering…</span>
@@ -660,9 +928,9 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
                     Retry
                   </button>
                 </div>
-              ) : shell.recordingPartial ? (
+              ) : freezeMode !== 'ended' && (shell.recordingPartial || skippedDamage) ? (
                 <div className="meeting-player__partial" role="status">
-                  Some segments were missing during upload — playing the available recording.
+                  Some segments were missing or damaged — skipping them and playing the rest of the recording.
                 </div>
               ) : null}
             </div>
@@ -956,7 +1224,7 @@ export const MeetingDetailView = ({ meetingId, preview, onBack }: MeetingDetailV
       </div>
 
       <aside className="meeting-ask" aria-label="AI Chat">
-        <AiChatView compact />
+        <AiChatView key={meetingId} compact meetingId={meetingId} />
       </aside>
     </section>
   );

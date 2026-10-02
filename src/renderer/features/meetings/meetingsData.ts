@@ -35,9 +35,9 @@ export const MEETINGS_SEED: MeetingSeed[] = [
     layout: 'grid',
     participants: [participants.arafat, participants.dana, participants.mia, participants.leo],
     summaryIntro:
-      'Kickoff session covering CallWave setup, workspace basics, and how Buddy captures meetings for follow-up.',
+      'Kickoff session covering CallWave setup, workspace basics, and how KukuNotes captures meetings for follow-up.',
     keyTopics: 'Product walkthrough, recording workflow, and first workspace setup.',
-    decisions: 'Adopt Buddy as the default capture tool for weekly syncs.',
+    decisions: 'Adopt KukuNotes as the default capture tool for weekly syncs.',
     unresolved: 'Confirm SSO rollout timeline with IT.',
     takeaways: [
       {
@@ -50,7 +50,7 @@ export const MEETINGS_SEED: MeetingSeed[] = [
       },
       {
         title: 'Follow-ups',
-        detail: 'Buddy will draft action items automatically after each session.',
+        detail: 'KukuNotes will draft action items automatically after each session.',
       },
     ],
     transcript: [
@@ -58,7 +58,7 @@ export const MEETINGS_SEED: MeetingSeed[] = [
         id: 't1',
         speaker: 'Arafat',
         timeLabel: '0:12',
-        text: 'Welcome everyone — today we will walk through CallWave and how Buddy fits in.',
+        text: 'Welcome everyone — today we will walk through CallWave and how KukuNotes fits in.',
       },
       {
         id: 't2',
@@ -191,7 +191,7 @@ export const MEETINGS_SEED: MeetingSeed[] = [
     summaryIntro:
       'Introductory call with Northstar stakeholders to align on goals, success metrics, and communication cadence.',
     keyTopics: 'Project goals, stakeholder map, and weekly reporting format.',
-    decisions: 'Weekly Friday summary email plus shared Buddy meeting folder.',
+    decisions: 'Weekly Friday summary email plus shared KukuNotes meeting folder.',
     unresolved: 'Await brand assets from the client marketing team.',
     takeaways: [
       {
@@ -243,7 +243,7 @@ export const MEETINGS_SEED: MeetingSeed[] = [
     summaryIntro:
       'Review of the add-event modal, custom date/time pickers, and reminder controls for visual consistency.',
     keyTopics: 'Picker overlays, AM/PM controls, and reminder card spacing.',
-    decisions: 'Ship floating pickers with Buddy primary accents.',
+    decisions: 'Ship floating pickers with KukuNotes primary accents.',
     unresolved: 'Validate keyboard navigation on the date grid.',
     takeaways: [
       {
@@ -326,7 +326,7 @@ export const MEETINGS_SEED: MeetingSeed[] = [
     summaryIntro:
       'Handoff between success and support covering open tickets, escalation paths, and customer preferences.',
     keyTopics: 'Open tickets, escalation matrix, and preferred contact channels.',
-    decisions: 'Route P1 issues through Buddy chat with meeting context attached.',
+    decisions: 'Route P1 issues through KukuNotes chat with meeting context attached.',
     unresolved: 'Confirm weekend on-call rotation.',
     takeaways: [
       {

@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
-import { join } from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type FileFilter } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { APP_NAME } from '../shared/constants/app.js';
-import type { AppInfo } from '../shared/types/electron-api.js';
+import type { AppInfo, ExportDocumentResult } from '../shared/types/electron-api.js';
 
 /*
   Root cause on Windows Electron:
@@ -220,6 +223,9 @@ const createMainWindow = () => {
     minWidth: 960,
     minHeight: 640,
     title: APP_NAME,
+    icon: isDev
+      ? join(app.getAppPath(), 'public/kukunotes-icon.png')
+      : join(__dirname, '../../dist/kukunotes-icon.png'),
     backgroundColor: '#f7f8fb',
     show: false,
     webPreferences: {
@@ -337,6 +343,122 @@ ipcMain.handle('payments:checkout-session', (_event, active: unknown) => {
   }
 
   scheduleCloseCheckoutWindows();
+});
+
+const MAX_EXPORT_HTML_LENGTH = 15 * 1024 * 1024;
+
+const toExportFileName = (value: unknown, extension: string) => {
+  const raw = typeof value === 'string' ? basename(value) : '';
+  const cleaned =
+    [...raw]
+      .filter((char) => char.charCodeAt(0) >= 32)
+      .join('')
+      .replace(/[<>:"/\\|?*]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120) || 'KukuNotes summary';
+
+  return cleaned.toLowerCase().endsWith(`.${extension}`) ? cleaned : `${cleaned}.${extension}`;
+};
+
+const readExportRequest = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid export request.');
+  }
+
+  const { html, fileName } = payload as { html?: unknown; fileName?: unknown };
+  if (typeof html !== 'string' || !html.trim() || html.length > MAX_EXPORT_HTML_LENGTH) {
+    throw new Error('Export content is empty or too large.');
+  }
+
+  return { html, fileName };
+};
+
+const askExportPath = async (defaultName: string, filter: FileFilter) => {
+  const options = {
+    title: 'Export summary',
+    defaultPath: join(app.getPath('documents'), defaultName),
+    filters: [filter],
+  };
+  const result =
+    mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showSaveDialog(mainWindow, options)
+      : await dialog.showSaveDialog(options);
+
+  return result.canceled || !result.filePath ? null : result.filePath;
+};
+
+const renderHtmlToPdf = async (html: string) => {
+  // Loading from a temp file avoids data-URL size limits for large summaries.
+  const tempPath = join(tmpdir(), `kukunotes-export-${randomUUID()}.html`);
+  await writeFile(tempPath, html, 'utf8');
+
+  const renderWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      javascript: false,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  try {
+    await renderWindow.loadFile(tempPath);
+    return await renderWindow.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      margins: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
+    });
+  } finally {
+    renderWindow.destroy();
+    await unlink(tempPath).catch(() => undefined);
+  }
+};
+
+ipcMain.handle('export:pdf', async (_event, payload: unknown): Promise<ExportDocumentResult> => {
+  const { html, fileName } = readExportRequest(payload);
+  const filePath = await askExportPath(toExportFileName(fileName, 'pdf'), {
+    name: 'PDF document',
+    extensions: ['pdf'],
+  });
+
+  if (!filePath) {
+    return { saved: false };
+  }
+
+  const pdf = await renderHtmlToPdf(html);
+  await writeFile(filePath, pdf);
+  return { saved: true, filePath };
+});
+
+ipcMain.handle('export:doc', async (_event, payload: unknown): Promise<ExportDocumentResult> => {
+  const { html, fileName } = readExportRequest(payload);
+  const filePath = await askExportPath(toExportFileName(fileName, 'doc'), {
+    name: 'Word document',
+    extensions: ['doc'],
+  });
+
+  if (!filePath) {
+    return { saved: false };
+  }
+
+  // BOM lets Word detect UTF-8 in HTML-based .doc files.
+  await writeFile(filePath, `\ufeff${html}`, 'utf8');
+  return { saved: true, filePath };
+});
+
+ipcMain.handle('export:reveal', (_event, filePath: unknown) => {
+  if (typeof filePath === 'string' && isAbsolute(filePath)) {
+    shell.showItemInFolder(filePath);
+  }
+});
+
+ipcMain.handle('shell:open-external', async (_event, url: unknown) => {
+  if (typeof url !== 'string' || !isHttpUrl(url)) {
+    throw new Error('Only http(s) links can be opened.');
+  }
+  await shell.openExternal(url);
 });
 
 void app.whenReady().then(() => {

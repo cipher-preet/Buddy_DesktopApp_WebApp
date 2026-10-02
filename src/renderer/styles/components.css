@@ -241,7 +241,7 @@
 
 .meeting-tabs {
   display: grid;
-  grid-template-columns: auto auto auto 1fr;
+  grid-template-columns: auto auto 1fr;
   align-items: stretch;
   gap: 18px;
   padding: 0 18px;
@@ -343,6 +343,10 @@
   overflow: hidden;
 }
 
+.meeting-panel__content[data-tab='ai-chat']:has(.add-context-popover) {
+  overflow: visible;
+}
+
 .meeting-panel__content section {
   display: grid;
   gap: var(--space-2);
@@ -358,8 +362,7 @@
   font-size: var(--font-size-sm);
 }
 
-.side-panel-meetings,
-.side-panel-share {
+.side-panel-meetings {
   display: grid;
   gap: 22px;
 }
@@ -388,73 +391,6 @@
 .side-panel-meeting-card small {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
-}
-
-.side-panel-share__actions {
-  display: grid;
-  gap: 8px;
-}
-
-.side-panel-share__actions button {
-  display: flex;
-  width: 100%;
-  min-height: 42px;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface-muted);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  text-align: left;
-}
-
-.side-panel-share__actions button:hover {
-  border-color: #c7d2fe;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-}
-
-.side-panel-share__note {
-  display: grid;
-  gap: 7px;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-spacing-wide);
-}
-
-.side-panel-share__note textarea {
-  min-height: 96px;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface-muted);
-  font: inherit;
-  text-transform: none;
-  resize: vertical;
-}
-
-.side-panel-share__note textarea:focus {
-  border-color: var(--color-primary);
-  background: #fff;
-  box-shadow: var(--focus-ring);
-  outline: none;
-}
-
-.side-panel-share__note span {
-  color: var(--color-text-soft);
-  font-weight: var(--font-weight-medium);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.side-panel-share__submit {
-  width: 100%;
 }
 
 .meeting-url-button {

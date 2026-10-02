@@ -1,4 +1,4 @@
-# Personal Buddy Desktop App
+# KukuNotes Desktop App
 
 Electron + React + TypeScript desktop app foundation with Redux Toolkit Query for API integration and shared CSS tokens for consistent design.
 

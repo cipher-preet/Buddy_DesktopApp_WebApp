@@ -48,7 +48,7 @@ export const createSeedEvents = (): CalendarEvent[] => [
   {
     id: 'seed-2',
     title: 'Company Anniversary',
-    description: 'Celebrate another year of Buddy.',
+    description: 'Celebrate another year of KukuNotes.',
     category: 'anniversary',
     date: dayOffset(-12),
     startMinutes: 10 * 60,
@@ -123,7 +123,7 @@ export const createSeedEvents = (): CalendarEvent[] => [
   {
     id: 'seed-10',
     title: 'Onboarding Session',
-    description: 'Welcome new hires to Buddy.',
+    description: 'Welcome new hires to KukuNotes.',
     category: 'onboarding',
     date: dayOffset(6),
     startMinutes: 13 * 60,
