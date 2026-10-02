@@ -75,7 +75,7 @@ export type ApiAssignMeetingSpace = {
   };
 };
 
-const DEFAULT_MEETINGS_LIMIT = 24;
+const DEFAULT_MEETINGS_LIMIT = 12;
 
 const unwrapMeetingData = <T,>(response: MeetingApiEnvelope<T>, fallbackMessage: string): T => {
   if (!response?.success || response.data === undefined) {
@@ -257,6 +257,53 @@ export const meetingsApi = api.injectEndpoints({
         return tags;
       },
     }),
+
+    deleteMeeting: builder.mutation<
+      { meetingSessionId: string },
+      { sessionId: string; spaceId?: string | null }
+    >({
+      query: ({ sessionId }) => ({
+        url: `meeting-recordings/${encodeURIComponent(sessionId)}`,
+        method: 'DELETE',
+      }),
+      transformResponse: (response: MeetingApiEnvelope<{ meetingSessionId?: string }>) => {
+        const payload = unwrapMeetingData(response, 'Unable to delete meeting');
+        return { meetingSessionId: String(payload.meetingSessionId || '') };
+      },
+      async onQueryStarted({ sessionId }, { dispatch, queryFulfilled, getState }) {
+        const cachedArgs = meetingsApi.util.selectCachedArgsForQuery(getState(), 'getMeetings');
+        const patches = cachedArgs.map((queryArg) =>
+          dispatch(
+            meetingsApi.util.updateQueryData('getMeetings', queryArg, (draft) => {
+              for (const page of draft.pages) {
+                const index = page.meetings.findIndex((meeting) => meeting.id === sessionId);
+                if (index >= 0) {
+                  page.meetings.splice(index, 1);
+                }
+              }
+            }),
+          ),
+        );
+
+        try {
+          await queryFulfilled;
+        } catch {
+          for (const patch of patches) {
+            patch.undo();
+          }
+        }
+      },
+      // The list is patched optimistically above; only refresh data derived from the meeting.
+      invalidatesTags: (_result, error, arg) => {
+        if (error || !arg.spaceId) {
+          return [];
+        }
+        return [
+          { type: 'SpaceNotes', id: arg.spaceId },
+          { type: 'SpaceTasks', id: arg.spaceId },
+        ];
+      },
+    }),
   }),
   overrideExisting: false,
 });
@@ -270,4 +317,5 @@ export const {
   useGetMeetingNotesQuery,
   useGetMeetingPlaybackQuery,
   useAssignMeetingSpaceMutation,
+  useDeleteMeetingMutation,
 } = meetingsApi;

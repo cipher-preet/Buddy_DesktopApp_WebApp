@@ -65,6 +65,42 @@ export const getFetchErrorStatus = (error: unknown): number | string | null => {
   return (error as { status?: number | string }).status ?? null;
 };
 
+/** Best human-readable message from an RTK Query / fetch error, else `fallback`. */
+export const getApiErrorMessage = (error: unknown, fallback: string) => {
+  if (!error || typeof error !== 'object') {
+    return fallback;
+  }
+
+  if ('data' in error) {
+    const data = (error as { data?: unknown }).data;
+    if (typeof data === 'string' && data.trim()) {
+      return data;
+    }
+    if (typeof data === 'object' && data && 'message' in data) {
+      const message = (data as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) {
+        return message.trim();
+      }
+    }
+  }
+
+  if ('error' in error && typeof (error as { error: unknown }).error === 'string') {
+    const message = (error as { error: string }).error.trim();
+    if (message && message !== 'FETCH_ERROR' && message !== 'PARSING_ERROR') {
+      return message;
+    }
+  }
+
+  if ('message' in error && typeof (error as { message: unknown }).message === 'string') {
+    const message = (error as { message: string }).message.trim();
+    if (message) {
+      return message;
+    }
+  }
+
+  return fallback;
+};
+
 export const isServerUnreachableError = (error: unknown): boolean => {
   const status = getFetchErrorStatus(error);
 

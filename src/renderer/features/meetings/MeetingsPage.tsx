@@ -11,6 +11,7 @@ import {
   FiMoreVertical,
   FiRefreshCw,
   FiSearch,
+  FiTrash2,
   FiVideo,
   FiX,
 } from 'react-icons/fi';
@@ -18,55 +19,19 @@ import {
 import { useAppSelector } from '@/app/hooks';
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
 import type { MeetingDetailTab, MeetingFocusTarget } from '@/features/search/searchTypes';
+import { getApiErrorMessage as getErrorMessage } from '@/services/apiErrors';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 import { useAssignMeetingSpaceMutation, useGetMeetingsInfiniteQuery } from '@/services/meetingsApi';
 
+import { DeleteMeetingDialog, type DeleteMeetingTarget } from './DeleteMeetingDialog';
 import { MeetingDetailView } from './MeetingDetailView';
 import type { MeetingListItem } from './meetingsApiTypes';
 
 type ViewMode = 'grid' | 'list';
 
 const SPACES_PAGE_SIZE = 12;
-const MEETINGS_PAGE_SIZE = 24;
-
-const getErrorMessage = (error: unknown, fallback: string) => {
-  if (!error) {
-    return fallback;
-  }
-
-  if (typeof error === 'object') {
-    if ('data' in error) {
-      const data = (error as { data?: unknown }).data;
-      if (typeof data === 'string' && data.trim()) {
-        return data;
-      }
-      if (typeof data === 'object' && data) {
-        if ('message' in data && typeof (data as { message: unknown }).message === 'string') {
-          const message = (data as { message: string }).message.trim();
-          if (message) {
-            return message;
-          }
-        }
-      }
-    }
-
-    if ('error' in error && typeof (error as { error: unknown }).error === 'string') {
-      const message = (error as { error: string }).error.trim();
-      if (message && message !== 'FETCH_ERROR' && message !== 'PARSING_ERROR') {
-        return message;
-      }
-    }
-
-    if ('message' in error && typeof (error as { message: unknown }).message === 'string') {
-      const message = (error as { message: string }).message.trim();
-      if (message) {
-        return message;
-      }
-    }
-  }
-
-  return fallback;
-};
+const MEETINGS_PAGE_SIZE = 12;
+const NEXT_PAGE_SKELETONS = 3;
 
 const MeetingThumbnail = ({ meeting }: { meeting: MeetingListItem }) => (
   <div className={`meeting-card__thumb meeting-card__thumb--${meeting.thumbnailTone}`}>
@@ -394,6 +359,46 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
     { skip: !userId, refetchOnMountOrArgChange: true },
   );
 
+  const [deleteTarget, setDeleteTarget] = useState<DeleteMeetingTarget | null>(null);
+  const [isMoreMeetingsError, setIsMoreMeetingsError] = useState(false);
+
+  useEffect(() => {
+    setIsMoreMeetingsError(false);
+  }, [filterSpaceId]);
+
+  const loadMoreMeetings = async () => {
+    setIsMoreMeetingsError(false);
+    const result = await fetchNextMeetingsPage();
+    if (result.isError) {
+      setIsMoreMeetingsError(true);
+    }
+  };
+
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreStateRef = useRef({ canLoad: false, fetchNext: loadMoreMeetings });
+  loadMoreStateRef.current = {
+    canLoad: Boolean(hasMoreMeetings) && !isFetchingMoreMeetings && !isMoreMeetingsError,
+    fetchNext: loadMoreMeetings,
+  };
+
+  // Auto-load the next page when the sentinel below the grid scrolls into view.
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && loadMoreStateRef.current.canLoad) {
+          void loadMoreStateRef.current.fetchNext();
+        }
+      },
+      { rootMargin: '0px 0px 320px 0px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreMeetings, isFetchingMoreMeetings, selectedId]);
+
   const spaces = useMemo(
     () => spacesData?.pages.flatMap((page) => page.spaces) ?? [],
     [spacesData],
@@ -699,6 +704,10 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
             setSelectedId(null);
             setDetailTab(undefined);
           }}
+          onDeleted={() => {
+            setSelectedId(null);
+            setDetailTab(undefined);
+          }}
         />
       </div>
     );
@@ -972,6 +981,24 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                     <MeetingThumbnail meeting={meeting} />
                   </button>
 
+                  <button
+                    type="button"
+                    className="meeting-card__delete"
+                    aria-label={`Delete ${meeting.title}`}
+                    title="Delete meeting"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuMeetingId(null);
+                      setDeleteTarget({
+                        id: meeting.id,
+                        title: meeting.title,
+                        spaceId: selectedSpaceId ?? null,
+                      });
+                    }}
+                  >
+                    <FiTrash2 aria-hidden="true" size={15} />
+                  </button>
+
                   <div className="meeting-card__bottom">
                     <button
                       type="button"
@@ -1036,18 +1063,57 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                 </article>
               );
             })}
+
+            {isFetchingMoreMeetings
+              ? Array.from({ length: NEXT_PAGE_SKELETONS }, (_, index) => (
+                  <div
+                    key={`next-skeleton-${index}`}
+                    className="meeting-card meeting-card--skeleton"
+                    aria-hidden="true"
+                  >
+                    <div className="meeting-card__thumb meeting-card__thumb--skeleton" />
+                    <div className="meeting-card__body">
+                      <span className="meeting-card__skeleton-line is-title" />
+                      <span className="meeting-card__skeleton-line" />
+                    </div>
+                  </div>
+                ))
+              : null}
           </div>
 
-          <div className="meetings-pagination">
-            {hasMoreMeetings ? (
+          <div className="meetings-pagination" aria-live="polite">
+            <div ref={loadMoreSentinelRef} className="meetings-pagination__sentinel" aria-hidden="true" />
+
+            {isFetchingMoreMeetings ? (
+              <p className="meetings-pagination__status" aria-busy="true">
+                <span className="home-spinner" aria-hidden="true" />
+                Loading more meetings…
+              </p>
+            ) : null}
+
+            {isMoreMeetingsError && !isFetchingMoreMeetings ? (
+              <div className="meetings-inline-banner" role="alert">
+                <FiAlertCircle aria-hidden="true" size={15} />
+                <p>Couldn’t load more meetings.</p>
+                <button type="button" onClick={() => void loadMoreMeetings()}>
+                  <FiRefreshCw aria-hidden="true" size={13} />
+                  Retry
+                </button>
+              </div>
+            ) : null}
+
+            {hasMoreMeetings && !isFetchingMoreMeetings && !isMoreMeetingsError ? (
               <button
                 type="button"
                 className="home-load-more"
-                disabled={isFetchingMoreMeetings}
-                onClick={() => void fetchNextMeetingsPage()}
+                onClick={() => void loadMoreMeetings()}
               >
-                {isFetchingMoreMeetings ? 'Loading…' : 'Load more meetings'}
+                Load more meetings
               </button>
+            ) : null}
+
+            {!hasMoreMeetings && !isMeetingsFetching && meetings.length > MEETINGS_PAGE_SIZE ? (
+              <p className="meetings-pagination__end">You’ve reached the end · {meetings.length} meetings</p>
             ) : null}
 
             {isMeetingsFetching && !isMeetingsLoading && !isFetchingMoreMeetings ? (
@@ -1055,6 +1121,14 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
             ) : null}
           </div>
         </>
+      ) : null}
+
+      {deleteTarget ? (
+        <DeleteMeetingDialog
+          meeting={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onDeleted={() => setDeleteTarget(null)}
+        />
       ) : null}
     </section>
   );

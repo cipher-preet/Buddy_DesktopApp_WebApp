@@ -167,23 +167,29 @@
   position: relative;
 }
 
+/* Anchored to the bell's centre so it sits on its top-right shoulder for 1, 2 or "9+" digits. */
 .nav-icon-button__badge {
   position: absolute;
-  top: 3px;
-  right: 2px;
-  display: grid;
-  min-width: 16px;
-  height: 16px;
+  top: 2px;
+  left: calc(50% + 2px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
   padding: 0 4px;
-  place-items: center;
   border: 2px solid #fff;
   border-radius: var(--radius-pill);
   color: #fff;
-  background: #f04438;
-  box-sizing: content-box;
+  background: linear-gradient(180deg, #3b74ff 0%, var(--color-primary) 100%);
+  box-shadow: 0 1px 3px rgb(19 85 255 / 0.35);
   font-size: 0.625rem;
   font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   line-height: 1;
+  white-space: nowrap;
   pointer-events: none;
 }
 

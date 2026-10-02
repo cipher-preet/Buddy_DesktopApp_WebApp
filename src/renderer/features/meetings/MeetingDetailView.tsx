@@ -6,6 +6,7 @@ import {
   FiMoreHorizontal,
   FiRefreshCw,
   FiShare2,
+  FiTrash2,
   FiVideo,
 } from 'react-icons/fi';
 
@@ -21,6 +22,7 @@ import {
 } from '@/services/meetingsApi';
 import { DEFAULT_API_BASE_URL } from '@shared/constants/app';
 
+import { DeleteMeetingDialog } from './DeleteMeetingDialog';
 import type { MeetingListItem } from './meetingsApiTypes';
 import type { MeetingTask } from './meetingsTypes';
 
@@ -81,6 +83,7 @@ type MeetingDetailViewProps = {
   preview?: MeetingListItem | null;
   initialTab?: DetailTab;
   onBack: () => void;
+  onDeleted?: (meetingId: string) => void;
 };
 
 const TAB_OPTIONS: Array<{ id: DetailTab; label: string }> = [
@@ -169,8 +172,15 @@ const SectionLoading = ({ label }: { label: string }) => (
   </div>
 );
 
-export const MeetingDetailView = ({ meetingId, preview, initialTab, onBack }: MeetingDetailViewProps) => {
+export const MeetingDetailView = ({
+  meetingId,
+  preview,
+  initialTab,
+  onBack,
+  onDeleted,
+}: MeetingDetailViewProps) => {
   const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? 'summary');
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [shouldPoll, setShouldPoll] = useState(() => preview?.ready === false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [activeTranscriptId, setActiveTranscriptId] = useState<string | null>(null);
@@ -804,10 +814,35 @@ export const MeetingDetailView = ({ meetingId, preview, initialTab, onBack }: Me
   return (
     <section className="meeting-detail" aria-label={shell.title}>
       <div className="meeting-detail__main">
-        <button type="button" className="meeting-detail__back" onClick={onBack}>
-          <FiArrowLeft aria-hidden="true" size={16} />
-          Back to meetings
-        </button>
+        <div className="meeting-detail__topbar">
+          <button type="button" className="meeting-detail__back" onClick={onBack}>
+            <FiArrowLeft aria-hidden="true" size={16} />
+            Back to meetings
+          </button>
+          {onDeleted ? (
+            <button
+              type="button"
+              className="meeting-detail__delete"
+              aria-label="Delete meeting"
+              title="Delete meeting"
+              onClick={() => setIsDeleteOpen(true)}
+            >
+              <FiTrash2 aria-hidden="true" size={15} />
+              Delete
+            </button>
+          ) : null}
+        </div>
+
+        {isDeleteOpen && onDeleted ? (
+          <DeleteMeetingDialog
+            meeting={{ id: meetingId, title: shell.title, spaceId: shell.spaceId ?? preview?.spaceId ?? null }}
+            onCancel={() => setIsDeleteOpen(false)}
+            onDeleted={(id) => {
+              setIsDeleteOpen(false);
+              onDeleted(id);
+            }}
+          />
+        ) : null}
 
         <div className="meeting-player-wrap">
           {isPlaybackLoading && !mediaSrc ? (
