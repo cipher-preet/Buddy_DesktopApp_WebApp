@@ -1,6 +1,7 @@
 import { api } from '@/services/api';
 import { mapNote, mapSpace, mapTask } from '@/features/dashboard/homeMappers';
 import type {
+  ApiNoteDetail,
   HomeApiEnvelope,
   NestedSpacesServiceResponse,
   NotesPage,
@@ -145,6 +146,15 @@ export const homeApi = api.injectEndpoints({
           nextCursor: page.nextCursor ?? null,
         };
       },
+      providesTags: (_result, _error, arg) => [{ type: 'SpaceNotes', id: arg.spaceId }],
+    }),
+    getNoteById: builder.query<ApiNoteDetail, { noteId: string; spaceId: string }>({
+      query: ({ noteId }) => ({
+        url: 'home/getStagedNoteById',
+        params: { noteId },
+      }),
+      transformResponse: (response: HomeApiEnvelope<ApiNoteDetail>) =>
+        unwrapHomeData(response, 'Unable to load note'),
       providesTags: (_result, _error, arg) => [{ type: 'SpaceNotes', id: arg.spaceId }],
     }),
     createSpace: builder.mutation<
@@ -390,6 +400,7 @@ export const {
   useGetUserSpacesInfiniteQuery,
   useGetSpaceTasksInfiniteQuery,
   useGetSpaceNotesInfiniteQuery,
+  useGetNoteByIdQuery,
   useCreateSpaceMutation,
   useStartListeningMutation,
   useCreateStagedTaskMutation,

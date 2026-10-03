@@ -89,5 +89,13 @@ export type WorkspaceNote = {
   id: string;
   title: string;
   excerpt: string;
+  /** The list API only sends a cut-off preview; the full body must be fetched by id. */
+  isTruncated: boolean;
   dateLabel: string;
+};
+
+export type ApiNoteDetail = {
+  id: string;
+  title: string;
+  body: string;
 };

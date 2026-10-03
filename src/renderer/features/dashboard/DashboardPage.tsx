@@ -22,6 +22,7 @@ import {
   useDeleteSpaceMutation,
   useDeleteStagedNoteMutation,
   useDeleteStagedTaskMutation,
+  useGetNoteByIdQuery,
   useGetSpaceNotesInfiniteQuery,
   useGetSpaceTasksInfiniteQuery,
   useGetUserSpacesInfiniteQuery,
@@ -33,7 +34,7 @@ import {
 
 import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote, WorkspaceSpace, WorkspaceTask } from './homeTypes';
-import { NoteBoard, NoteReader, type NoteLayout } from './NoteBoard';
+import { NoteBoard, type NoteLayout } from './NoteBoard';
 import { TaskBoard, type TaskFilter } from './TaskBoard';
 import { TaskFilterMenu } from './TaskFilterMenu';
 import {
@@ -119,7 +120,6 @@ export const DashboardPage = ({
   const taskStatusPendingRef = useRef<Map<string, boolean>>(new Map());
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
   const [noteLayout, setNoteLayout] = useState<NoteLayout>(readNoteLayout);
-  const [readingNote, setReadingNote] = useState<WorkspaceNote | null>(null);
   const [pendingFocus, setPendingFocus] = useState<DashboardFocusTarget | null>(null);
   const [searchHitId, setSearchHitId] = useState<string | null>(null);
   const focusLoadsRef = useRef({ spaces: 0, items: 0, refetched: false });
@@ -244,10 +244,6 @@ export const DashboardPage = ({
       // Layout preference is optional.
     }
   };
-
-  useEffect(() => {
-    setReadingNote(null);
-  }, [selectedSpaceId]);
 
   useEffect(() => {
     if (!focusTarget) {
@@ -392,6 +388,26 @@ export const DashboardPage = ({
   const [deleteTask] = useDeleteStagedTaskMutation();
   const [deleteNote] = useDeleteStagedNoteMutation();
   const [setTaskStatus] = useSetStagedTaskStatusMutation();
+
+  // Editing a preview-only note must start from the full body, or saving would truncate it.
+  const editingNote = editTarget?.kind === 'note' ? editTarget.note : null;
+  const needsFullEditNote = Boolean(editingNote?.isTruncated && selectedSpace);
+  const {
+    data: fullEditNote,
+    isFetching: isFetchingEditNote,
+    isError: isEditNoteError,
+  } = useGetNoteByIdQuery(
+    { noteId: editingNote?.id ?? '', spaceId: selectedSpace?.id ?? '' },
+    { skip: !needsFullEditNote, refetchOnMountOrArgChange: true },
+  );
+  const isEditNoteReady = !needsFullEditNote || (Boolean(fullEditNote) && !isFetchingEditNote);
+
+  useEffect(() => {
+    if (needsFullEditNote && isEditNoteError && !isFetchingEditNote) {
+      setEditTarget(null);
+      showToast({ message: 'Unable to load the full note for editing.', type: 'error' });
+    }
+  }, [isEditNoteError, isFetchingEditNote, needsFullEditNote, showToast]);
 
   const toggleTaskCompletion = (taskId: string) => {
     if (!selectedSpace) {
@@ -1070,13 +1086,10 @@ export const DashboardPage = ({
                     <>
                       <NoteBoard
                         notes={notes}
+                        spaceId={selectedSpace.id}
                         layout={noteLayout}
                         openItemMenuId={openItemMenuId}
                         searchHitId={searchHitId}
-                        onOpen={(note) => {
-                          setOpenItemMenuId(null);
-                          setReadingNote(note);
-                        }}
                         onMenuChange={setOpenItemMenuId}
                         onEdit={(note) => setEditTarget({ kind: 'note', note })}
                         onDelete={(note) =>
@@ -1113,27 +1126,6 @@ export const DashboardPage = ({
       </div>
     </section>
     </div>
-
-      {readingNote && selectedSpace ? (
-        <NoteReader
-          note={readingNote}
-          spaceName={selectedSpace.name}
-          onClose={() => setReadingNote(null)}
-          onEdit={() => {
-            setEditTarget({ kind: 'note', note: readingNote });
-            setReadingNote(null);
-          }}
-          onDelete={() => {
-            setDeleteTarget({
-              kind: 'note',
-              id: readingNote.id,
-              label: readingNote.title,
-              spaceId: selectedSpace.id,
-            });
-            setReadingNote(null);
-          }}
-        />
-      ) : null}
 
       {createModal === 'space' ? (
         <CreateSpaceModal
@@ -1204,12 +1196,12 @@ export const DashboardPage = ({
         />
       ) : null}
 
-      {editTarget?.kind === 'note' && selectedSpace ? (
+      {editTarget?.kind === 'note' && selectedSpace && isEditNoteReady ? (
         <CreateNoteModal
           mode="edit"
           spaceName={selectedSpace.name}
           initialTitle={editTarget.note.title}
-          initialDescription={editTarget.note.excerpt}
+          initialDescription={fullEditNote?.body.trim() || editTarget.note.excerpt}
           isSubmitting={isMutating}
           onClose={() => {
             if (!isMutating) {

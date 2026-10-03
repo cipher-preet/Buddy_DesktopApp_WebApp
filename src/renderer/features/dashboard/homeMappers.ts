@@ -201,9 +201,17 @@ export const mapTask = (task: ApiTaskCard): WorkspaceTask => {
   };
 };
 
-export const mapNote = (note: ApiNoteCard): WorkspaceNote => ({
-  id: String(note.id),
-  title: note.title || 'Untitled note',
-  excerpt: note.body?.trim() || note.bodyPreview || '',
-  dateLabel: formatNoteDate(note.updatedAt || note.createdAt),
-});
+// Must match the backend's NOTE_PREVIEW_LENGTH for getStagedNotesBySpace.
+const NOTE_PREVIEW_LENGTH = 140;
+
+export const mapNote = (note: ApiNoteCard): WorkspaceNote => {
+  const body = note.body?.trim();
+  const preview = note.bodyPreview || '';
+  return {
+    id: String(note.id),
+    title: note.title || 'Untitled note',
+    excerpt: body || preview.trim(),
+    isTruncated: !body && preview.length >= NOTE_PREVIEW_LENGTH,
+    dateLabel: formatNoteDate(note.updatedAt || note.createdAt),
+  };
+};
