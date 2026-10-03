@@ -1,8 +1,9 @@
 {
   "name": "buddy-desktop-app",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "KukuNotes desktop app built with Electron, React, and RTK Query.",
+  "description": "KukuNotes - AI meeting notes, tasks and chat.",
+  "author": "Buddy AI",
   "main": "dist-electron/main/main.js",
   "type": "module",
   "scripts": {
@@ -13,6 +14,9 @@
     "build": "npm run build:desktop",
     "build:desktop": "npm run typecheck && vite build --mode desktop && tsc -p tsconfig.electron.json",
     "build:web": "npm run typecheck:renderer && vite build",
+    "dist:store": "npm run build:desktop && electron-builder --win appx --x64 --publish never",
+    "dist:dir": "npm run build:desktop && electron-builder --win dir --x64 --publish never",
+    "store:assets": "powershell -ExecutionPolicy Bypass -File scripts/generate-appx-assets.ps1",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "npm run typecheck:renderer && npm run typecheck:electron",
     "typecheck:renderer": "tsc --noEmit",
@@ -20,17 +24,10 @@
     "lint": "eslint .",
     "format": "prettier --write ."
   },
-  "dependencies": {
-    "@fontsource/inter": "^5.3.0",
-    "@reduxjs/toolkit": "^2.5.0",
-    "electron-store": "^10.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-icons": "^5.7.0",
-    "react-redux": "^9.2.0"
-  },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@fontsource/inter": "^5.3.0",
+    "@reduxjs/toolkit": "^2.5.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
@@ -38,10 +35,16 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
+    "electron-store": "^10.0.0",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
     "prettier": "^3.4.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-icons": "^5.7.0",
+    "react-redux": "^9.2.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vite": "^6.0.5",
@@ -50,16 +53,37 @@
   "build": {
     "appId": "com.kukunotes.desktop",
     "productName": "KukuNotes",
+    "copyright": "Copyright © 2026 Buddy AI",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
     "win": {
       "icon": "build/icon.ico"
     },
-    "files": [
-      "dist",
-      "dist-electron",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "build"
+    "appx": {
+      "identityName": "BuddyAI.KukuNotes",
+      "publisher": "CN=0561DA73-3DE0-4153-A30A-0735F7B6C039",
+      "publisherDisplayName": "Buddy AI",
+      "applicationId": "KukuNotes",
+      "displayName": "KukuNotes",
+      "backgroundColor": "#0F1850",
+      "showNameOnTiles": true,
+      "minVersion": "10.0.17763.0",
+      "maxVersionTested": "10.0.26100.0",
+      "languages": [
+        "en-US"
+      ],
+      "capabilities": [
+        "internetClient",
+        "microphone"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
 }

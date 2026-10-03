@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { APP_NAME } from '../shared/constants/app.js';
 import type { AppInfo, ExportDocumentResult } from '../shared/types/electron-api.js';
+import { RENDERER_SERVER_PORT, startRendererServer } from './rendererServer.js';
 
 /*
   Root cause on Windows Electron:
@@ -24,6 +25,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 let mainWindow: BrowserWindow | null = null;
+let rendererUrl: string | null = null;
 let checkoutSessionActive = false;
 const checkoutWindows = new Set<BrowserWindow>();
 let closeCheckoutTimer: NodeJS.Timeout | null = null;
@@ -213,7 +215,18 @@ const loadRenderer = (window: BrowserWindow) => {
     return;
   }
 
-  void window.loadFile(join(__dirname, '../../dist/index.html'));
+  if (rendererUrl) {
+    void window.loadURL(rendererUrl);
+  }
+};
+
+const isAppUrl = (url: string) => {
+  const appOrigin = isDev ? process.env.VITE_DEV_SERVER_URL : rendererUrl;
+  try {
+    return Boolean(appOrigin) && new URL(url).origin === new URL(appOrigin as string).origin;
+  } catch {
+    return false;
+  }
 };
 
 const createMainWindow = () => {
@@ -283,6 +296,17 @@ const createMainWindow = () => {
   mainWindow.webContents.on('did-create-window', (childWindow) => {
     if (checkoutSessionActive) {
       wireCheckoutWindow(childWindow);
+    }
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (isHttpUrl(url) || url.startsWith('mailto:')) {
+      void shell.openExternal(url);
     }
   });
 
@@ -461,16 +485,49 @@ ipcMain.handle('shell:open-external', async (_event, url: unknown) => {
   await shell.openExternal(url);
 });
 
-void app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
-  createMainWindow();
+const startProductionRenderer = async () => {
+  try {
+    const { url } = await startRendererServer(join(__dirname, '../../dist'));
+    rendererUrl = url;
+    return true;
+  } catch (error) {
+    const reason = (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+      ? `Port ${RENDERER_SERVER_PORT} is already in use by another program.`
+      : String(error);
+    dialog.showErrorBox(`${APP_NAME} could not start`, reason);
+    return false;
+  }
+};
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.focus();
     }
   });
-});
+
+  void app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);
+
+    if (!isDev && !(await startProductionRenderer())) {
+      app.quit();
+      return;
+    }
+
+    createMainWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+      }
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   closeCheckoutWindows();

@@ -24,6 +24,19 @@ VITE_API_BASE_URL=https://your-api-url.com
 
 RTK Query reads this value in `src/renderer/services/api.ts`.
 
+## Microsoft Store build
+
+```bash
+npm.cmd run dist:store
+```
+
+Produces `release/KukuNotes-<version>-x64.appx` (unsigned; the Store signs it on upload). Upload it in Partner Center → KukuNotes → Submission → Packages. Bump `version` in `package.json` for every new submission.
+
+- Store identity (`BuddyAI.KukuNotes`, publisher CN) lives in `package.json` → `build.appx`.
+- Tile images live in `build/appx`; regenerate from `build/icon.png` with `npm.cmd run store:assets`.
+- Packaged builds serve the UI from `http://127.0.0.1:41731` (see `src/main/rendererServer.ts`), which proxies `/api` to the Cloud Run backends like `vercel.json`. That origin must be listed in the Google OAuth client's Authorized JavaScript origins for Google sign-in.
+- `npm.cmd run dist:dir` builds an unpacked app in `release/win-unpacked` for quick local testing.
+
 ## Folder Structure
 
 ```text

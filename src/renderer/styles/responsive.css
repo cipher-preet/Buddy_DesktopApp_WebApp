@@ -1,0 +1,297 @@
+/*
+  Mobile / narrow-viewport refinements.
+  Loaded last so these rules win over page styles at the same specificity.
+*/
+
+/* ---------- Shell ---------- */
+
+/* Mobile browsers: 100vh includes the collapsible URL bar, 100dvh does not. */
+@supports (height: 100dvh) {
+  @media (max-width: 900px) {
+    .app-main,
+    .app-sidebar,
+    .meeting-panel,
+    .app-content[data-view-mode='chat'],
+    .ai-chat-page:not(.ai-chat-page--panel) {
+      height: 100dvh;
+    }
+
+    .app-content {
+      height: calc(100dvh - var(--header-height));
+    }
+
+    .home-container .home-workspace {
+      height: calc(100dvh - var(--header-height) - 56px);
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .collapsed-panel-rail {
+    top: auto;
+    right: 12px;
+    bottom: calc(16px + var(--safe-bottom));
+    grid-auto-flow: column;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 999px;
+    transform: translateY(12px) scale(0.96);
+  }
+
+  .collapsed-panel-rail[data-visible='true'] {
+    transform: none;
+  }
+
+  .collapsed-panel-rail button {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+  }
+
+  .app-shell[data-recording-active='true'] .collapsed-panel-rail {
+    bottom: calc(150px + var(--safe-bottom));
+  }
+
+  .workspace-layout:has(.collapsed-panel-rail[data-visible='true']) .app-content {
+    padding-bottom: calc(76px + var(--safe-bottom));
+  }
+
+  .workspace-layout:has(.collapsed-panel-rail[data-visible='true']) .home-container .home-workspace {
+    height: calc(100vh - var(--header-height) - 92px - var(--safe-bottom));
+    height: calc(100dvh - var(--header-height) - 92px - var(--safe-bottom));
+  }
+
+  .app-shell[data-recording-active='true']
+    .workspace-layout:has(.collapsed-panel-rail[data-visible='true'])
+    .app-content {
+    padding-bottom: calc(210px + var(--safe-bottom));
+  }
+}
+
+/* ---------- Auth ---------- */
+
+@media (max-width: 900px) {
+  .auth-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-panel {
+    min-width: 0;
+  }
+
+  .auth-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-actions {
+    width: min(320px, 100%);
+  }
+}
+
+/* ---------- Home ---------- */
+
+.home-container .space-detail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 640px) {
+  .note-reader {
+    width: 100%;
+  }
+}
+
+@container detail (max-width: 400px) {
+  .space-switch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .space-switch__button {
+    min-width: 0;
+    padding: 0 8px;
+  }
+}
+
+/* ---------- Meetings ---------- */
+
+@media (max-width: 480px) {
+  .meeting-card__space-count {
+    max-width: 42%;
+  }
+}
+
+@container meeting-detail (max-width: 860px) {
+  .meeting-detail {
+    align-self: start;
+  }
+
+  .meeting-detail__main {
+    min-height: auto;
+  }
+}
+
+/* ---------- Calendar ---------- */
+
+@container calendar (max-width: 980px) {
+  .cal-month {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cal-timeline {
+    overflow-x: hidden;
+  }
+}
+
+@container calendar (max-width: 640px) {
+  /* Week: one compact row per day, date on the left, activity on the right. */
+  .cal-week,
+  .cal-week-grid {
+    align-content: start;
+  }
+
+  .cal-week-grid {
+    grid-auto-rows: auto;
+    gap: 6px;
+  }
+
+  .cal-week-grid .cal-day-cell {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+    gap: 4px 10px;
+    min-height: 56px;
+    padding: 8px 10px;
+  }
+
+  .cal-week-grid .cal-day-cell__top {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 2px;
+    grid-row: 1 / span 2;
+  }
+
+  .cal-week-grid .cal-day-cell__top small {
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .cal-week-grid .cal-day-cell__top strong {
+    font-size: var(--font-size-md);
+  }
+
+  .cal-week-grid .cal-day-summary,
+  .cal-week-grid .cal-day-cell__events {
+    grid-column: 2;
+  }
+
+  .cal-week-grid .cal-day-cell__events {
+    align-content: start;
+  }
+
+  .cal-week .cal-event-block__title {
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+  }
+
+  /* Day */
+  .cal-day-view {
+    padding: 14px 12px;
+  }
+
+  .cal-day-view__header h2 {
+    font-size: var(--font-size-md);
+  }
+
+  .cal-day-item__top {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .cal-timeline__slot span {
+    left: 56px;
+    right: 0;
+  }
+
+  .cal-now-line {
+    left: 48px;
+  }
+}
+
+/* Month on phones: uniform cells with colored activity dots; tapping a day opens its details. */
+@container calendar (max-width: 520px) {
+  .cal-weekday-row,
+  .cal-month-grid {
+    gap: 3px;
+  }
+
+  .cal-weekday-row {
+    padding: 0;
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+
+  .cal-month-grid {
+    grid-auto-rows: minmax(52px, 1fr);
+  }
+
+  .cal-month-grid .cal-day-cell {
+    align-items: center;
+    justify-content: flex-start;
+    gap: 5px;
+    padding: 6px 2px;
+    border-radius: 8px;
+  }
+
+  .cal-month-grid .cal-day-cell__top {
+    justify-content: center;
+  }
+
+  .cal-month-grid .cal-day-cell__top strong {
+    font-size: 13px;
+  }
+
+  .cal-month-grid .cal-day-cell__events {
+    display: none;
+  }
+
+  .cal-month-grid .cal-day-summary {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 3px;
+    max-width: 30px;
+  }
+
+  .cal-month-grid .cal-day-summary .cal-day-summary__badge {
+    width: 6px;
+    height: 6px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .cal-month-grid .cal-day-summary .cal-day-summary__badge > * {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .cal-view-picker .cal-menu,
+  .cal-filter .cal-menu {
+    left: 0;
+    right: auto;
+  }
+
+  .cal-menu {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* ---------- AI chat ---------- */
+
+@media (max-width: 640px) {
+  .ai-chat-page--panel {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+}
