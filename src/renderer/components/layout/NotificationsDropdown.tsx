@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { FiBell, FiCheckSquare, FiFileText, FiRefreshCw, FiVideo } from 'react-icons/fi';
 
 import type { SearchNavigationTarget } from '@/features/search/searchTypes';
@@ -107,7 +108,7 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
         return;
       }
 
-      const width = 380;
+      const width = panelRef.current?.offsetWidth || 380;
       const gap = 10;
       const viewportPadding = 16;
       // Prefer opening into the main content area (to the right of the sidebar icon).
@@ -269,7 +270,8 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
     );
   };
 
-  return (
+  // Portaled so the mobile drawer's transform and overflow can't trap or clip the fixed panel.
+  return createPortal(
     <div
       ref={panelRef}
       className="notifications-dropdown"
@@ -317,6 +319,7 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
       </div>
 
       {renderBody()}
-    </div>
+    </div>,
+    document.body,
   );
 };

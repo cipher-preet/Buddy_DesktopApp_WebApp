@@ -288,6 +288,95 @@
   }
 }
 
+/* ---------- Notifications ---------- */
+
+/* The panel hugs its content and grows only up to a per-screen cap. */
+.notifications-dropdown {
+  min-height: 0;
+  max-height: min(520px, calc(100vh - 96px));
+}
+
+.notifications-dropdown__empty {
+  min-height: 220px;
+}
+
+@media (max-width: 900px) {
+  .notifications-dropdown {
+    width: min(350px, calc(100vw - 24px));
+    max-height: min(480px, 70vh);
+  }
+}
+
+/* Phones: left is set inline by JS, hence !important. */
+@media (max-width: 640px) {
+  .notifications-dropdown {
+    left: 10px !important;
+    width: min(340px, calc(100vw - 20px));
+    max-height: min(440px, 62vh);
+    border-radius: 12px;
+  }
+
+  .notifications-dropdown__header {
+    padding: 12px 12px 6px;
+  }
+
+  .notifications-dropdown__header h2 {
+    font-size: var(--font-size-md);
+  }
+
+  .notifications-dropdown__mark-read {
+    flex-shrink: 0;
+    min-height: 26px;
+  }
+
+  .notifications-dropdown__tabs {
+    padding-inline: 12px;
+  }
+
+  .notifications-section__label {
+    padding: 8px 12px 4px;
+  }
+
+  .notifications-section ul {
+    padding: 0 4px;
+  }
+
+  .notification-item__main {
+    gap: 10px;
+    padding: 8px 26px 8px 8px;
+  }
+
+  .notification-item__icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .notification-item__preview {
+    -webkit-line-clamp: 1;
+  }
+
+  .notifications-dropdown__empty {
+    min-height: 0;
+    gap: 6px;
+    padding: 24px 20px 28px;
+  }
+
+  .notifications-dropdown__empty-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .notifications-dropdown__empty strong {
+    font-size: var(--font-size-md);
+  }
+
+  @supports (height: 100dvh) {
+    .notifications-dropdown {
+      max-height: min(440px, 62dvh);
+    }
+  }
+}
+
 /* ---------- AI chat ---------- */
 
 @media (max-width: 640px) {
