@@ -2755,11 +2755,21 @@
   color: #027a48;
 }
 
-.auth-error--standalone {
+.auth-error--standalone,
+.auth-info--standalone {
   width: 320px;
   max-width: 100%;
   margin-top: 12px;
   text-align: center;
+}
+
+.auth-info--standalone {
+  color: var(--color-text-muted);
+}
+
+.auth-info--standalone .auth-text-button {
+  min-height: 0;
+  padding: 0;
 }
 
 .auth-page--bootstrapping {

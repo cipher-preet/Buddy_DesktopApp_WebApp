@@ -1,13 +1,23 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type FileFilter } from 'electron';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { APP_NAME } from '../shared/constants/app.js';
-import type { AppInfo, ExportDocumentResult } from '../shared/types/electron-api.js';
-import { RENDERER_SERVER_PORT, startRendererServer } from './rendererServer.js';
+import type {
+  AppInfo,
+  ExportDocumentResult,
+  GoogleBrowserLoginResult,
+  GoogleBrowserLoginStart,
+} from '../shared/types/electron-api.js';
+import {
+  NODE_API_TARGET,
+  RENDERER_SERVER_PORT,
+  startRendererServer,
+  type GoogleLoginCompletion,
+} from './rendererServer.js';
 
 /*
   Root cause on Windows Electron:
@@ -242,7 +252,8 @@ const createMainWindow = () => {
     backgroundColor: '#f7f8fb',
     show: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/preload.js'),
+      // Electron ignores package.json "type": "module" for preloads, so it must be CommonJS.
+      preload: join(__dirname, '../preload/preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -485,9 +496,64 @@ ipcMain.handle('shell:open-external', async (_event, url: unknown) => {
   await shell.openExternal(url);
 });
 
+/*
+  Google sign-in through the system browser (see the backend's GoogleDesktopLogin controller). The verifier
+  never leaves this process until the backend's handoff code arrives, so a code alone cannot be redeemed.
+*/
+const GOOGLE_LOGIN_TIMEOUT_MS = 10 * 60_000;
+let pendingGoogleLogin: { verifier: string; startedAt: number } | null = null;
+
+const focusMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+};
+
+const completeGoogleBrowserLogin = ({ code, error }: GoogleLoginCompletion) => {
+  const pending = pendingGoogleLogin;
+  pendingGoogleLogin = null;
+  if (!pending || Date.now() - pending.startedAt > GOOGLE_LOGIN_TIMEOUT_MS || !mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+
+  const result: GoogleBrowserLoginResult = code
+    ? { code, verifier: pending.verifier }
+    : { error: error || 'Google sign-in failed. Please try again.' };
+  mainWindow.webContents.send('auth:google-browser-result', result);
+  focusMainWindow();
+  return true;
+};
+
+ipcMain.handle('auth:google-browser-start', async (): Promise<GoogleBrowserLoginStart> => {
+  // Only packaged builds run the loopback server the backend redirects back to; dev keeps in-app sign-in.
+  if (!rendererUrl) {
+    return { available: false };
+  }
+
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  pendingGoogleLogin = { verifier, startedAt: Date.now() };
+
+  const startUrl = new URL('/api/v1/auth/google/desktop/start', NODE_API_TARGET);
+  startUrl.searchParams.set('challenge', challenge);
+  await shell.openExternal(startUrl.toString());
+  return { available: true };
+});
+
+ipcMain.handle('auth:google-browser-cancel', () => {
+  pendingGoogleLogin = null;
+});
+
 const startProductionRenderer = async () => {
   try {
-    const { url } = await startRendererServer(join(__dirname, '../../dist'));
+    const { url } = await startRendererServer(join(__dirname, '../../dist'), {
+      onGoogleLoginComplete: completeGoogleBrowserLogin,
+    });
     rendererUrl = url;
     return true;
   } catch (error) {

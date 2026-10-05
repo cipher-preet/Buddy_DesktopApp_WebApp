@@ -186,7 +186,7 @@ export const requestGoogleIdToken = async (clientId: string) => {
           error instanceof Error
             ? error
             : new Error(
-                'Google Sign-In could not open. Add http://127.0.0.1:5173 as an Authorized JavaScript origin for this Google client ID.',
+                `Google Sign-In could not open. Add ${window.location.origin} as an Authorized JavaScript origin for this Google client ID.`,
               ),
         );
       }

@@ -78,6 +78,11 @@ export type GoogleLoginRequest = {
   platform?: 'web' | 'android' | 'ios';
 };
 
+export type GoogleDesktopExchangeRequest = {
+  code: string;
+  verifier: string;
+};
+
 export type DeleteAccountRequest = {
   confirmation: 'DELETE';
 };
@@ -112,7 +117,14 @@ const rawBaseQuery = fetchBaseQuery({
   },
 });
 
-const PUBLIC_AUTH_PATHS = ['auth/send-otp', 'auth/check-phone', 'auth/verify-otp', 'auth/google', 'auth/login'];
+const PUBLIC_AUTH_PATHS = [
+  'auth/send-otp',
+  'auth/check-phone',
+  'auth/verify-otp',
+  'auth/google',
+  'auth/google/desktop/exchange',
+  'auth/login',
+];
 
 const isPublicAuthRequest = (args: string | FetchArgs) => {
   const url = typeof args === 'string' ? args : args.url;
@@ -252,6 +264,15 @@ export const api = createApi({
       transformResponse: (response: AuthApiEnvelope<AuthPayload>) =>
         unwrapAuthData(response, 'Google sign-in failed'),
     }),
+    googleDesktopExchange: builder.mutation<AuthPayload, GoogleDesktopExchangeRequest>({
+      query: (body) => ({
+        url: 'auth/google/desktop/exchange',
+        method: 'POST',
+        body: { ...body, platform: 'web' },
+      }),
+      transformResponse: (response: AuthApiEnvelope<AuthPayload>) =>
+        unwrapAuthData(response, 'Google sign-in failed'),
+    }),
     checkAuth: builder.query<CheckAuthData, void>({
       query: () => ({
         url: 'auth/checkauth',
@@ -318,6 +339,7 @@ export const {
   useCheckPhoneMutation,
   useVerifyOtpMutation,
   useGoogleLoginMutation,
+  useGoogleDesktopExchangeMutation,
   useLazyCheckAuthQuery,
   useUpdateProfileMutation,
   useLogoutMutation,

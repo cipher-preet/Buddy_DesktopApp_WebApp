@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { FiArrowLeft, FiPhone, FiSmartphone } from 'react-icons/fi';
 import { FcGoogle } from 'react-icons/fc';
 
@@ -12,8 +12,10 @@ import {
   normalizeIndianMobileInput,
 } from '@/features/auth/phoneUtils';
 import type { AuthPayload } from '@/features/auth/authTypes';
+import type { GoogleBrowserLoginResult } from '@shared/types/electron-api';
 import {
   useCheckPhoneMutation,
+  useGoogleDesktopExchangeMutation,
   useGoogleLoginMutation,
   useSendOtpMutation,
   useVerifyOtpMutation,
@@ -55,11 +57,14 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
   const [infoMessage, setInfoMessage] = useState('');
   const [resendIn, setResendIn] = useState(0);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isWaitingForBrowser, setIsWaitingForBrowser] = useState(false);
 
   const [checkPhone, { isLoading: isCheckingPhone }] = useCheckPhoneMutation();
   const [sendOtp, { isLoading: isSendingOtp }] = useSendOtpMutation();
   const [verifyOtp, { isLoading: isVerifyingOtp }] = useVerifyOtpMutation();
   const [googleLogin, { isLoading: isGoogleApiLoading }] = useGoogleLoginMutation();
+  const [googleDesktopExchange, { isLoading: isExchangingGoogle }] = useGoogleDesktopExchangeMutation();
+  const browserLoginResultRef = useRef<(result: GoogleBrowserLoginResult) => Promise<void>>(async () => undefined);
 
   useEffect(() => {
     if (resendIn <= 0) {
@@ -90,8 +95,50 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
     onAuthenticated();
   };
 
+  useEffect(() => {
+    browserLoginResultRef.current = async (result) => {
+      setIsWaitingForBrowser(false);
+      if ('error' in result) {
+        setErrorMessage(result.error);
+        return;
+      }
+      try {
+        const payload = await googleDesktopExchange({ code: result.code, verifier: result.verifier }).unwrap();
+        completeAuth(payload);
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error, 'Google sign-in failed. Please try again.'));
+      }
+    };
+  });
+
+  useEffect(
+    () => window.electronApi?.onGoogleBrowserLoginResult((result) => void browserLoginResultRef.current(result)),
+    [],
+  );
+
+  const cancelBrowserLogin = () => {
+    setIsWaitingForBrowser(false);
+    void window.electronApi?.cancelGoogleBrowserLogin();
+  };
+
   const handleGoogleContinue = async () => {
     resetMessages();
+
+    // Packaged desktop builds sign in through the system browser, which doesn't depend on the app's origin
+    // being registered with Google; the web build and dev builds keep the in-app flow below.
+    const electronApi = window.electronApi;
+    if (electronApi?.startGoogleBrowserLogin) {
+      try {
+        const { available } = await electronApi.startGoogleBrowserLogin();
+        if (available) {
+          setIsWaitingForBrowser(true);
+          return;
+        }
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error, 'Could not open your browser for Google sign-in.'));
+        return;
+      }
+    }
 
     if (!googleClientId) {
       setErrorMessage('Google Sign-In is not configured for this app.');
@@ -182,7 +229,14 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
     }
   };
 
-  const isBusy = isGoogleLoading || isGoogleApiLoading || isCheckingPhone || isSendingOtp || isVerifyingOtp;
+  const isBusy =
+    isGoogleLoading || isGoogleApiLoading || isExchangingGoogle || isCheckingPhone || isSendingOtp || isVerifyingOtp;
+  const googleButtonLabel =
+    isGoogleLoading || isGoogleApiLoading || isExchangingGoogle
+      ? 'Connecting…'
+      : isWaitingForBrowser
+        ? 'Waiting for Google…'
+        : 'Continue with Google';
 
   return (
     <main className="auth-page" aria-label="Sign in">
@@ -273,13 +327,22 @@ export const AuthPage = ({ onAuthenticated }: AuthPageProps) => {
                 <div className="auth-actions">
                   <button type="button" onClick={handleGoogleContinue} disabled={isBusy}>
                     <FcGoogle aria-hidden="true" size={22} />
-                    <span>{isGoogleLoading || isGoogleApiLoading ? 'Connecting…' : 'Continue with Google'}</span>
+                    <span>{googleButtonLabel}</span>
                   </button>
                   <button type="button" onClick={startPhoneStep} disabled={isBusy} aria-expanded={step === 'phone'}>
                     <FiSmartphone aria-hidden="true" size={22} />
                     <span>Continue with mobile number</span>
                   </button>
                 </div>
+
+                {isWaitingForBrowser ? (
+                  <p className="auth-info auth-info--standalone" role="status">
+                    Finish signing in with Google in your browser, then come back here.{' '}
+                    <button className="auth-text-button" type="button" onClick={cancelBrowserLogin}>
+                      Cancel
+                    </button>
+                  </p>
+                ) : null}
 
                 {step === 'phone' ? (
                   <form className="phone-auth-form" onSubmit={handleSendOtp} aria-label="Continue with mobile number">

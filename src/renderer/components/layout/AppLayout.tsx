@@ -47,6 +47,9 @@ const panelTabs: { id: SidePanelTab; label: string }[] = [
 const DRAWER_BREAKPOINT = 900;
 const PANEL_OVERLAY_BREAKPOINT = 1440;
 const NOTIFICATIONS_POLL_MS = 30_000;
+const DESKTOP_APP_STORE_URL = 'https://apps.microsoft.com/detail/9NCZSN8SMPQ1?hl=en-us&gl=IN&ocid=pdpshare';
+// The preload bridge exists only inside the desktop app, never on the website.
+const IS_DESKTOP_APP = typeof window !== 'undefined' && Boolean(window.electronApi);
 const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
@@ -356,14 +359,16 @@ export const AppLayout = ({
         </nav>
 
         <div className="app-sidebar__footer">
-          <div className="download-card">
-            <strong>Get the desktop app</strong>
-            <p>Local, reliable, bot-free recording</p>
-            <a href="#download">
-              <span>Download</span>
-              <FiDownload aria-hidden="true" size={15} />
-            </a>
-          </div>
+          {!IS_DESKTOP_APP ? (
+            <div className="download-card">
+              <strong>Get the desktop app</strong>
+              <p>Local, reliable, bot-free recording</p>
+              <a href={DESKTOP_APP_STORE_URL} target="_blank" rel="noopener noreferrer">
+                <span>Download</span>
+                <FiDownload aria-hidden="true" size={15} />
+              </a>
+            </div>
+          ) : null}
 
           <div className="plan-card">
             <div className="plan-card__row">

@@ -14,7 +14,17 @@ export const RENDERER_SERVER_HOST = '127.0.0.1';
 export const RENDERER_SERVER_PORT = 41731;
 
 const CHAT_API_TARGET = 'https://buddy-ai-api-710178903619.asia-south1.run.app';
-const NODE_API_TARGET = 'https://buddy-node-backend-scz7pyp3ha-el.a.run.app';
+export const NODE_API_TARGET = 'https://buddy-node-backend-scz7pyp3ha-el.a.run.app';
+
+/** The backend's browser-based Google login redirects here (fixed on the backend as DESKTOP_LOGIN_RETURN_URL). */
+const GOOGLE_LOGIN_COMPLETE_PATH = '/auth/google/complete';
+
+export type GoogleLoginCompletion = { code?: string; error?: string };
+
+type RendererServerOptions = {
+  /** Returns false when no sign-in is pending, e.g. a stale or replayed link. */
+  onGoogleLoginComplete?: (completion: GoogleLoginCompletion) => boolean;
+};
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -101,11 +111,54 @@ const serveStatic = async (res: ServerResponse, rootDir: string, pathname: strin
   }
 };
 
-export const startRendererServer = (rootDir: string) =>
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+const sendGoogleLoginPage = (res: ServerResponse, title: string, message: string) => {
+  res.writeHead(200, {
+    'Content-Type': MIME_TYPES['.html'],
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+    'Referrer-Policy': 'no-referrer',
+  });
+  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>KukuNotes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f8fb;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#101828}
+main{max-width:420px;padding:32px;border:1px solid #e4e7ec;border-radius:16px;background:#fff;text-align:center}
+h1{margin:0 0 8px;font-size:20px}p{margin:0;color:#475467;line-height:1.5}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`);
+};
+
+const handleGoogleLoginComplete = (
+  res: ServerResponse,
+  searchParams: URLSearchParams,
+  onComplete: RendererServerOptions['onGoogleLoginComplete'],
+) => {
+  const code = searchParams.get('code') ?? undefined;
+  const error = searchParams.get('error') ?? undefined;
+  const accepted = Boolean(onComplete?.({ code, error }));
+
+  if (!accepted) {
+    sendGoogleLoginPage(res, 'Sign-in link expired', 'Start again from KukuNotes by choosing Continue with Google.');
+  } else if (code) {
+    sendGoogleLoginPage(res, 'You are signed in', 'You can close this tab and return to KukuNotes.');
+  } else {
+    sendGoogleLoginPage(res, 'Sign-in did not complete', error || 'Return to KukuNotes and try again.');
+  }
+};
+
+export const startRendererServer = (rootDir: string, options: RendererServerOptions = {}) =>
   new Promise<{ server: Server; url: string }>((resolve, reject) => {
     const root = normalize(rootDir);
     const server = createServer((req, res) => {
-      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+      const requestUrl = new URL(req.url ?? '/', 'http://localhost');
+      const { pathname } = requestUrl;
+
+      if (pathname === GOOGLE_LOGIN_COMPLETE_PATH && req.method === 'GET') {
+        handleGoogleLoginComplete(res, requestUrl.searchParams, options.onGoogleLoginComplete);
+        return;
+      }
+
       const apiTarget = resolveApiTarget(pathname);
 
       if (apiTarget) {
