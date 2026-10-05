@@ -142,6 +142,26 @@ const isNotReadyError = (error: unknown) => {
   return (error as { status?: unknown }).status === 409;
 };
 
+const PLAYBACK_NOT_READY_MESSAGES: Record<string, string> = {
+  recording: 'This meeting is still being recorded. The video will appear after recording stops.',
+  waiting_for_first_upload: 'Waiting for the recording to upload from the browser that recorded it.',
+  waiting_for_stop:
+    'Waiting for the browser that recorded this meeting to finish uploading. Keep Chrome open on that computer — KukuNotes will finish it automatically if it does not reconnect.',
+  processing: 'Your recording is being prepared. The video will appear here shortly.',
+  merge_failed: 'Preparing the video failed. KukuNotes is retrying automatically.',
+};
+
+const getPlaybackNotReadyMessage = (error: unknown, statusLabel: string) => {
+  const reason =
+    error && typeof error === 'object' && 'data' in error
+      ? (error as { data?: { data?: { reason?: unknown } } }).data?.data?.reason
+      : undefined;
+  if (typeof reason === 'string' && PLAYBACK_NOT_READY_MESSAGES[reason]) {
+    return PLAYBACK_NOT_READY_MESSAGES[reason];
+  }
+  return `Status: ${statusLabel}. The video will appear here when processing finishes.`;
+};
+
 const SectionState = ({
   title,
   message,
@@ -977,7 +997,7 @@ export const MeetingDetailView = ({
                 <strong>{playbackNotReady ? 'Recording not ready' : 'Recording unavailable'}</strong>
                 <p>
                   {playbackNotReady
-                    ? `Status: ${shell.statusLabel}. The video will appear here when processing finishes.`
+                    ? getPlaybackNotReadyMessage(playbackError, shell.statusLabel)
                     : playbackErrorMessage}
                 </p>
                 {showPlaybackRetry ? (
