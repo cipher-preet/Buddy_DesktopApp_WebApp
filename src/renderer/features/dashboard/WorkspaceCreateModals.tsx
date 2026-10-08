@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { FiCalendar, FiEdit3, FiFileText, FiFolder, FiFlag, FiTrash2, FiX } from 'react-icons/fi';
+import { useMemo, useState, type ReactNode } from 'react';
+import { FiEdit3, FiFileText, FiFolder, FiFlag, FiTrash2, FiX } from 'react-icons/fi';
 
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import {
+  CustomDatePicker,
   CustomDropdown,
   TextInput,
   TextTextarea,
@@ -107,6 +108,68 @@ const dueOptions = [
   { id: 'custom', label: 'Custom date', description: 'Pick an exact due date' },
 ];
 
+type ModalShellProps = {
+  ariaLabel: string;
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  isSubmitting?: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  footer: ReactNode;
+};
+
+const ModalShell = ({
+  ariaLabel,
+  eyebrow,
+  title,
+  subtitle,
+  isSubmitting = false,
+  onClose,
+  children,
+  footer,
+}: ModalShellProps) => (
+  <div
+    className="settings-modal-backdrop"
+    role="presentation"
+    onClick={() => {
+      if (!isSubmitting) {
+        onClose();
+      }
+    }}
+  >
+    <div
+      className="home-create-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+      aria-busy={isSubmitting}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <header className="home-create-modal__header">
+        <div>
+          <p>{eyebrow}</p>
+          <h2>{title}</h2>
+          <span className="home-create-modal__subtitle">{subtitle}</span>
+        </div>
+        <button
+          type="button"
+          className="home-create-modal__close"
+          onClick={onClose}
+          aria-label="Close"
+          disabled={isSubmitting}
+        >
+          <FiX aria-hidden="true" size={18} />
+        </button>
+      </header>
+
+      <div className="home-create-modal__body">{children}</div>
+
+      <footer className="home-create-modal__footer">{footer}</footer>
+    </div>
+  </div>
+);
+
 export const CreateSpaceModal = ({
   onClose,
   onCreate,
@@ -144,39 +207,43 @@ export const CreateSpaceModal = ({
   };
 
   return (
-    <div
-      className="settings-modal-backdrop"
-      role="presentation"
-      onClick={() => {
-        if (!isSubmitting) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className="settings-modal settings-action-modal home-create-modal"
-        role="dialog"
-        aria-label={isEdit ? 'Edit space' : 'Create space'}
-        aria-busy={isSubmitting}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <h2>{isEdit ? 'Edit space' : 'Create New Space'}</h2>
-            <p>
-              {isEdit
-                ? 'Update the name or description for this space.'
-                : 'Give your space a name to organize tasks and notes.'}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
-            <FiX aria-hidden="true" size={18} />
+    <ModalShell
+      ariaLabel={isEdit ? 'Edit space' : 'Create space'}
+      eyebrow={isEdit ? 'Workspace' : 'New workspace'}
+      title={isEdit ? 'Edit space' : 'Create New Space'}
+      subtitle={
+        isEdit
+          ? 'Update the name or description for this space.'
+          : 'Give your space a name to organize tasks and notes.'
+      }
+      isSubmitting={isSubmitting}
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            className="home-create-modal__cancel"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Cancel
           </button>
-        </header>
-
+          <button
+            className="home-create-modal__submit"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (isEdit ? 'Saving…' : 'Creating…') : isEdit ? 'Save changes' : 'Create Space'}
+          </button>
+        </>
+      }
+    >
+      <section className="home-create-section" aria-label="Space details">
+        <h3>Details</h3>
         <TextInput
           label="Space name"
-          icon={<FiFolder aria-hidden="true" size={16} />}
+          icon={<FiFolder aria-hidden="true" size={15} />}
           value={name}
           onChange={(event) => {
             setName(event.target.value);
@@ -194,33 +261,15 @@ export const CreateSpaceModal = ({
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="Optional short description for this space"
+          rows={3}
           maxLength={200}
           hint={`${description.trim().length}/200`}
           disabled={isSubmitting}
         />
+      </section>
 
-        {error ? <p className="settings-form-error">{error}</p> : null}
-
-        <div className="settings-modal-actions">
-          <button
-            className="settings-secondary-button"
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
-          <button
-            className="settings-primary-button"
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (isEdit ? 'Saving…' : 'Creating…') : isEdit ? 'Save changes' : 'Create Space'}
-          </button>
-        </div>
-      </div>
-    </div>
+      {error ? <p className="home-create-modal__error">{error}</p> : null}
+    </ModalShell>
   );
 };
 
@@ -245,12 +294,19 @@ export const CreateTaskModal = ({
   const [priority, setPriority] = useState<TaskPriority>(initialPriority);
   const [isDueOpen, setIsDueOpen] = useState(false);
   const [isPriorityOpen, setIsPriorityOpen] = useState(false);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [error, setError] = useState('');
 
   const resolvedDueDate = useMemo(
     () => (duePreset === 'custom' ? customDueDate : getPresetDate(duePreset)),
     [customDueDate, duePreset],
   );
+
+  const closeMenus = () => {
+    setIsDueOpen(false);
+    setIsPriorityOpen(false);
+    setIsDatePickerOpen(false);
+  };
 
   const handleSubmit = () => {
     if (isSubmitting) {
@@ -279,37 +335,39 @@ export const CreateTaskModal = ({
   };
 
   return (
-    <div
-      className="settings-modal-backdrop"
-      role="presentation"
-      onClick={() => {
-        if (!isSubmitting) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className="settings-modal settings-action-modal home-create-modal"
-        role="dialog"
-        aria-label={isEdit ? 'Edit task' : 'Create task'}
-        aria-busy={isSubmitting}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <h2>{isEdit ? 'Edit task' : 'New task'}</h2>
-            <p>
-              {spaceName} · {todayLabel()}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
-            <FiX aria-hidden="true" size={18} />
+    <ModalShell
+      ariaLabel={isEdit ? 'Edit task' : 'Create task'}
+      eyebrow={isEdit ? 'Task' : 'New task'}
+      title={isEdit ? 'Edit task' : 'New task'}
+      subtitle={`${spaceName} · ${todayLabel()}`}
+      isSubmitting={isSubmitting}
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            className="home-create-modal__cancel"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Cancel
           </button>
-        </header>
-
+          <button
+            className="home-create-modal__submit"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save task'}
+          </button>
+        </>
+      }
+    >
+      <section className="home-create-section" aria-label="Task details">
+        <h3>Details</h3>
         <TextInput
           label="Title"
-          icon={<FiEdit3 aria-hidden="true" size={16} />}
+          icon={<FiEdit3 aria-hidden="true" size={15} />}
           value={title}
           onChange={(event) => {
             setTitle(event.target.value);
@@ -328,9 +386,13 @@ export const CreateTaskModal = ({
             setError('');
           }}
           placeholder="Write a short description..."
+          rows={3}
           disabled={isSubmitting}
         />
+      </section>
 
+      <section className="home-create-section" aria-label="Task schedule">
+        <h3>Schedule</h3>
         <div className="home-create-modal__row">
           <CustomDropdown
             label="Due date"
@@ -341,10 +403,9 @@ export const CreateTaskModal = ({
               if (isSubmitting) {
                 return;
               }
+              setIsPriorityOpen(false);
+              setIsDatePickerOpen(false);
               setIsDueOpen(open);
-              if (open) {
-                setIsPriorityOpen(false);
-              }
             }}
             onChange={(value) => setDuePreset(value as DuePreset)}
           />
@@ -358,24 +419,31 @@ export const CreateTaskModal = ({
               if (isSubmitting) {
                 return;
               }
+              setIsDueOpen(false);
+              setIsDatePickerOpen(false);
               setIsPriorityOpen(open);
-              if (open) {
-                setIsDueOpen(false);
-              }
             }}
             onChange={(value) => setPriority(value as TaskPriority)}
           />
         </div>
 
         {duePreset === 'custom' ? (
-          <TextInput
+          <CustomDatePicker
             label="Custom due date"
-            icon={<FiCalendar aria-hidden="true" size={16} />}
-            type="date"
             value={customDueDate}
-            onChange={(event) => setCustomDueDate(event.target.value)}
-            hint={`Selected: ${formatDisplayDate(customDueDate)}`}
-            disabled={isSubmitting}
+            isOpen={isDatePickerOpen}
+            onOpenChange={(open) => {
+              if (isSubmitting) {
+                return;
+              }
+              setIsDueOpen(false);
+              setIsPriorityOpen(false);
+              setIsDatePickerOpen(open);
+            }}
+            onChange={(value) => {
+              setCustomDueDate(value);
+              closeMenus();
+            }}
           />
         ) : (
           <div className="custom-field-summary">
@@ -385,29 +453,10 @@ export const CreateTaskModal = ({
             </span>
           </div>
         )}
+      </section>
 
-        {error ? <p className="settings-form-error">{error}</p> : null}
-
-        <div className="settings-modal-actions">
-          <button
-            className="settings-secondary-button"
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
-          <button
-            className="settings-primary-button"
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save task'}
-          </button>
-        </div>
-      </div>
-    </div>
+      {error ? <p className="home-create-modal__error">{error}</p> : null}
+    </ModalShell>
   );
 };
 
@@ -450,37 +499,39 @@ export const CreateNoteModal = ({
   };
 
   return (
-    <div
-      className="settings-modal-backdrop"
-      role="presentation"
-      onClick={() => {
-        if (!isSubmitting) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className="settings-modal settings-action-modal home-create-modal"
-        role="dialog"
-        aria-label={isEdit ? 'Edit note' : 'Create note'}
-        aria-busy={isSubmitting}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <div>
-            <h2>{isEdit ? 'Edit note' : 'New note'}</h2>
-            <p>
-              {spaceName} · {todayLabel()}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" disabled={isSubmitting}>
-            <FiX aria-hidden="true" size={18} />
+    <ModalShell
+      ariaLabel={isEdit ? 'Edit note' : 'Create note'}
+      eyebrow={isEdit ? 'Note' : 'New note'}
+      title={isEdit ? 'Edit note' : 'New note'}
+      subtitle={`${spaceName} · ${todayLabel()}`}
+      isSubmitting={isSubmitting}
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            className="home-create-modal__cancel"
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            Cancel
           </button>
-        </header>
-
+          <button
+            className="home-create-modal__submit"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save note'}
+          </button>
+        </>
+      }
+    >
+      <section className="home-create-section" aria-label="Note details">
+        <h3>Details</h3>
         <TextInput
           label="Title"
-          icon={<FiFileText aria-hidden="true" size={16} />}
+          icon={<FiFileText aria-hidden="true" size={15} />}
           value={title}
           onChange={(event) => {
             setTitle(event.target.value);
@@ -499,31 +550,13 @@ export const CreateNoteModal = ({
             setError('');
           }}
           placeholder="Write a short description..."
+          rows={4}
           disabled={isSubmitting}
         />
+      </section>
 
-        {error ? <p className="settings-form-error">{error}</p> : null}
-
-        <div className="settings-modal-actions">
-          <button
-            className="settings-secondary-button"
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
-          <button
-            className="settings-primary-button"
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Save note'}
-          </button>
-        </div>
-      </div>
-    </div>
+      {error ? <p className="home-create-modal__error">{error}</p> : null}
+    </ModalShell>
   );
 };
 

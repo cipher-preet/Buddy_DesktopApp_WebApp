@@ -340,110 +340,125 @@ export const MindmapPage = () => {
 
   return (
     <section className="mindmap-page" aria-label="Mindmap" data-sidebar-open={sidebarOpen ? 'true' : undefined}>
-      {sidebarOpen ? (
-        <aside className="mindmap-spaces" aria-label="Spaces">
-          <div className="mindmap-spaces__header">
-            <div>
-              <p>Spaces</p>
-              <h2>All spaces</h2>
-            </div>
-            <button
-              type="button"
-              className="mindmap-spaces__toggle"
-              aria-label="Collapse spaces"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <FiChevronsLeft size={16} />
-            </button>
+      <aside
+        className="mindmap-spaces"
+        aria-label="Spaces"
+        aria-hidden={sidebarOpen ? undefined : true}
+        data-open={sidebarOpen ? 'true' : 'false'}
+      >
+        <div className="mindmap-spaces__header">
+          <div>
+            <p>Spaces</p>
+            <h2>All spaces</h2>
           </div>
+          <button
+            type="button"
+            className="mindmap-spaces__toggle"
+            aria-label="Collapse spaces"
+            tabIndex={sidebarOpen ? undefined : -1}
+            onClick={() => setSidebarOpen(false)}
+          >
+            <FiChevronsLeft size={16} />
+          </button>
+        </div>
 
-          <label className="mindmap-spaces__search">
-            <FiSearch aria-hidden="true" size={15} />
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search spaces"
-            />
-          </label>
+        <label className="mindmap-spaces__search">
+          <FiSearch aria-hidden="true" size={15} />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search spaces"
+            tabIndex={sidebarOpen ? undefined : -1}
+          />
+        </label>
 
-          <div className="mindmap-spaces__list" role="list">
-            {!userId ? (
-              <div className="mindmap-spaces__state">
-                <p>Sign in to load your spaces.</p>
-              </div>
-            ) : null}
+        <div className="mindmap-spaces__list" role="list">
+          {!userId ? (
+            <div className="mindmap-spaces__state">
+              <p>Sign in to load your spaces.</p>
+            </div>
+          ) : null}
 
-            {userId && isSpacesLoading ? (
-              <div className="mindmap-spaces__state">
-                <p>Loading spaces…</p>
-              </div>
-            ) : null}
+          {userId && isSpacesLoading ? (
+            <div className="mindmap-spaces__state">
+              <p>Loading spaces…</p>
+            </div>
+          ) : null}
 
-            {userId && isSpacesError ? (
-              <div className="mindmap-spaces__state mindmap-spaces__state--error">
-                <p>{spacesErrorMessage}</p>
-                <button type="button" className="mindmap-spaces__retry" onClick={() => void refetchSpaces()}>
-                  Retry
-                </button>
-              </div>
-            ) : null}
-
-            {userId && !isSpacesLoading && !isSpacesError && filteredSpaces.length === 0 ? (
-              <div className="mindmap-spaces__state">
-                <p>{query.trim() ? 'No spaces match your search.' : 'No spaces yet.'}</p>
-              </div>
-            ) : null}
-
-            {filteredSpaces.map((space) => {
-              const isActive = space.id === activeSpaceId;
-
-              return (
-                <button
-                  key={space.id}
-                  type="button"
-                  role="listitem"
-                  className="mindmap-spaces__item"
-                  data-active={isActive ? 'true' : undefined}
-                  onClick={() => selectSpace(space.id)}
-                >
-                  <span className="mindmap-spaces__icon" aria-hidden="true">
-                    <FiFolder size={15} />
-                  </span>
-                  <span className="mindmap-spaces__meta">
-                    <strong>{space.name}</strong>
-                    <small>{space.updatedAtLabel}</small>
-                  </span>
-                </button>
-              );
-            })}
-
-            {hasMoreSpaces ? (
+          {userId && isSpacesError ? (
+            <div className="mindmap-spaces__state mindmap-spaces__state--error">
+              <p>{spacesErrorMessage}</p>
               <button
                 type="button"
-                className="mindmap-spaces__load-more"
-                disabled={isFetchingMoreSpaces}
-                onClick={() => void fetchNextSpacesPage()}
+                className="mindmap-spaces__retry"
+                tabIndex={sidebarOpen ? undefined : -1}
+                onClick={() => void refetchSpaces()}
               >
-                {isFetchingMoreSpaces ? 'Loading…' : 'Load more'}
+                Retry
               </button>
-            ) : null}
+            </div>
+          ) : null}
 
-            {isSpacesFetching && !isSpacesLoading && !isFetchingMoreSpaces ? (
-              <p className="mindmap-spaces__hint">Refreshing…</p>
-            ) : null}
-          </div>
-        </aside>
-      ) : (
-        <button
-          type="button"
-          className="mindmap-spaces-open"
-          aria-label="Open spaces"
-          onClick={() => setSidebarOpen(true)}
-        >
-          <FiFolder size={18} />
-        </button>
-      )}
+          {userId && !isSpacesLoading && !isSpacesError && filteredSpaces.length === 0 ? (
+            <div className="mindmap-spaces__state">
+              <p>{query.trim() ? 'No spaces match your search.' : 'No spaces yet.'}</p>
+            </div>
+          ) : null}
+
+          {filteredSpaces.map((space) => {
+            const isActive = space.id === activeSpaceId;
+
+            return (
+              <button
+                key={space.id}
+                type="button"
+                role="listitem"
+                className="mindmap-spaces__item"
+                data-active={isActive ? 'true' : undefined}
+                tabIndex={sidebarOpen ? undefined : -1}
+                onClick={() => selectSpace(space.id)}
+              >
+                <span className="mindmap-spaces__icon" aria-hidden="true">
+                  <FiFolder size={15} />
+                </span>
+                <span className="mindmap-spaces__meta">
+                  <strong>{space.name}</strong>
+                  <small>{space.updatedAtLabel}</small>
+                </span>
+              </button>
+            );
+          })}
+
+          {hasMoreSpaces ? (
+            <button
+              type="button"
+              className="mindmap-spaces__load-more"
+              disabled={isFetchingMoreSpaces}
+              tabIndex={sidebarOpen ? undefined : -1}
+              onClick={() => void fetchNextSpacesPage()}
+            >
+              {isFetchingMoreSpaces ? 'Loading…' : 'Load more'}
+            </button>
+          ) : null}
+
+          {isSpacesFetching && !isSpacesLoading && !isFetchingMoreSpaces ? (
+            <p className="mindmap-spaces__hint">Refreshing…</p>
+          ) : null}
+        </div>
+      </aside>
+
+      <button
+        type="button"
+        className="mindmap-spaces-open"
+        aria-label="Open spaces"
+        aria-hidden={sidebarOpen ? true : undefined}
+        tabIndex={sidebarOpen ? -1 : undefined}
+        data-visible={sidebarOpen ? 'false' : 'true'}
+        onClick={() => setSidebarOpen(true)}
+      >
+        <FiFolder size={18} />
+      </button>
 
       <div className="mindmap-canvas-shell">
         {!selectedSpace ? (

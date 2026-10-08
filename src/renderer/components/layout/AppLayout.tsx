@@ -360,14 +360,21 @@ export const AppLayout = ({
 
         <div className="app-sidebar__footer">
           {!IS_DESKTOP_APP ? (
-            <div className="download-card">
-              <strong>Get the desktop app</strong>
-              <p>Local, reliable, bot-free recording</p>
-              <a href={DESKTOP_APP_STORE_URL} target="_blank" rel="noopener noreferrer">
-                <span>Download</span>
-                <FiDownload aria-hidden="true" size={15} />
-              </a>
-            </div>
+            <a
+              className="download-card"
+              href={DESKTOP_APP_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span className="download-card__icon" aria-hidden="true">
+                <FiDownload size={14} />
+              </span>
+              <span className="download-card__copy">
+                <strong>Desktop app</strong>
+                <small>Local & bot-free</small>
+              </span>
+              <span className="download-card__cta">Get</span>
+            </a>
           ) : null}
 
           <div className="plan-card">

@@ -719,7 +719,37 @@
 .nav-list {
   display: grid;
   gap: var(--space-1);
-  margin-bottom: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: var(--space-3);
+  padding-right: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #c5cedb transparent;
+  -ms-overflow-style: auto;
+}
+
+.nav-list::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.nav-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background-color: #c5cedb;
+}
+
+.nav-list::-webkit-scrollbar-thumb:hover {
+  background-color: #a8b4c5;
 }
 
 .nav-list__item,
@@ -778,8 +808,8 @@
 .app-sidebar__footer {
   display: grid;
   gap: var(--space-3);
+  flex: 0 0 auto;
   margin-top: auto;
-  max-height: 280px;
   max-width: none;
   overflow: hidden;
   opacity: 1;

@@ -3,7 +3,10 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: #f3f4f6;
+  background-color: #f3f4f6;
+  background-image: radial-gradient(circle, #c5cad3 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  background-position: 0 0;
   contain: layout paint;
   overflow: hidden;
 }
@@ -29,6 +32,25 @@
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: var(--shadow-md);
+  transform-origin: top left;
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease,
+    visibility 220ms ease;
+}
+
+.mindmap-spaces[data-open='false'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-12px) scale(0.96);
+}
+
+.mindmap-spaces[data-open='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0) scale(1);
 }
 
 .mindmap-spaces__header {
@@ -81,6 +103,32 @@
   width: 40px;
   height: 40px;
   box-shadow: var(--shadow-sm);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease,
+    visibility 200ms ease,
+    background var(--transition-base);
+}
+
+.mindmap-spaces-open[data-visible='false'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.9);
+}
+
+.mindmap-spaces-open[data-visible='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mindmap-spaces,
+  .mindmap-spaces-open {
+    transition: none;
+  }
 }
 
 .mindmap-spaces__search {
@@ -257,7 +305,7 @@
   height: 100%;
   place-items: center;
   padding: 24px;
-  background: #f3f4f6;
+  background: transparent;
 }
 
 .mindmap-prompt__actions {

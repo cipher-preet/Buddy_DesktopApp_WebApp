@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
+  FiBookOpen,
   FiCalendar,
   FiFileText,
   FiGitBranch,
   FiGrid,
   FiHome,
   FiSettings,
+  FiShoppingBag,
   FiTarget,
   FiVideo,
 } from 'react-icons/fi';
@@ -27,8 +29,10 @@ import { bootstrapAuthSession } from '@/features/auth/bootstrapAuthSession';
 import { readAuthSession } from '@/features/auth/authStorage';
 import { CalendarPage } from '@/features/calendar/CalendarPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { DocumentationPage } from '@/features/documentation/DocumentationPage';
 import { DocumentItPage } from '@/features/document-it/DocumentItPage';
 import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
+import { MarketplacePage } from '@/features/marketplace/MarketplacePage';
 import { MeetingsPage } from '@/features/meetings/MeetingsPage';
 import { MindmapPage } from '@/features/mindmap/MindmapPage';
 import { PlanGateProvider } from '@/features/settings/PlanGateProvider';
@@ -50,7 +54,9 @@ type AppRoute =
   | 'meetings'
   | 'calendar'
   | 'integrations'
-  | 'settings';
+  | 'marketplace'
+  | 'settings'
+  | 'documentation';
 
 const APP_ROUTES: readonly AppRoute[] = [
   'home',
@@ -61,7 +67,9 @@ const APP_ROUTES: readonly AppRoute[] = [
   'meetings',
   'calendar',
   'integrations',
+  'marketplace',
   'settings',
+  'documentation',
 ] as const;
 
 const isAppRoute = (value: string): value is AppRoute =>
@@ -244,10 +252,22 @@ export const App = () => {
       onSelect: () => setActiveRoute('integrations'),
     },
     {
+      label: 'Marketplace',
+      icon: FiShoppingBag,
+      isActive: activeRoute === 'marketplace',
+      onSelect: () => setActiveRoute('marketplace'),
+    },
+    {
       label: 'Settings',
       icon: FiSettings,
       isActive: activeRoute === 'settings',
       onSelect: () => setActiveRoute('settings'),
+    },
+    {
+      label: 'Documentation',
+      icon: FiBookOpen,
+      isActive: activeRoute === 'documentation',
+      onSelect: () => setActiveRoute('documentation'),
     },
   ];
 
@@ -286,6 +306,7 @@ export const App = () => {
     meetings: <MeetingsPage focusTarget={meetingTarget} onFocusTargetHandled={() => setMeetingTarget(null)} />,
     calendar: <CalendarPage focusTarget={calendarTarget} onFocusTargetHandled={() => setCalendarTarget(null)} />,
     integrations: <IntegrationsPage />,
+    marketplace: <MarketplacePage />,
     settings: (
       <SettingsPage
         focusSection={settingsFocus}
@@ -297,6 +318,7 @@ export const App = () => {
         }}
       />
     ),
+    documentation: <DocumentationPage />,
   }[activeRoute];
 
   const viewMode =
@@ -304,7 +326,7 @@ export const App = () => {
       ? 'chat'
       : activeRoute === 'mindmap'
         ? 'canvas'
-        : activeRoute === 'meetings'
+        : activeRoute === 'meetings' || activeRoute === 'achieve-goal'
           ? 'wide'
           : 'default';
 
