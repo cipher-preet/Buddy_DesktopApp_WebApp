@@ -37,6 +37,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api/v1/mindmap': {
+          target: env.VITE_CHAT_API_PROXY_TARGET || 'http://127.0.0.1:8000',
+          changeOrigin: true,
+          secure: false,
+        },
         '/api': {
           target: apiProxyTarget,
           changeOrigin: true,

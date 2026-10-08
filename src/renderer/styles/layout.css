@@ -798,7 +798,8 @@
   overflow: hidden;
 }
 
-.app-main[data-view-mode='chat'] {
+.app-main[data-view-mode='chat'],
+.app-main[data-view-mode='canvas'] {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -866,6 +867,7 @@
 }
 
 .workspace-layout[data-view-mode='chat'],
+.workspace-layout[data-view-mode='canvas'],
 .workspace-layout[data-view-mode='wide'] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -898,7 +900,8 @@
   flex: 1 1 auto;
 }
 
-.app-content[data-view-mode='chat'] {
+.app-content[data-view-mode='chat'],
+.app-content[data-view-mode='canvas'] {
   height: 100vh;
   padding: 0;
   overflow: hidden;

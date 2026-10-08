@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   FiAlertCircle,
   FiCheckSquare,
+  FiFile,
   FiFileText,
   FiFolder,
+  FiGitBranch,
   FiGrid,
   FiList,
   FiPlus,
@@ -32,6 +34,9 @@ import {
   useUpdateStagedTaskMutation,
 } from '@/services/homeApi';
 
+import { DocumentItPage } from '@/features/document-it/DocumentItPage';
+import { SpaceMindmapSection } from '@/features/mindmap/SpaceMindmapSection';
+
 import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote, WorkspaceSpace, WorkspaceTask } from './homeTypes';
 import { NoteBoard, type NoteLayout } from './NoteBoard';
@@ -44,7 +49,7 @@ import {
   CreateTaskModal,
 } from './WorkspaceCreateModals';
 
-type ActiveSection = 'tasks' | 'notes';
+type ActiveSection = 'tasks' | 'notes' | 'document' | 'mindmap';
 type CreateModal = 'space' | 'task' | 'note' | null;
 type HomeSectionFocus = 'notes' | 'tasks' | 'spaces';
 type EditTarget =
@@ -66,7 +71,7 @@ type DashboardPageProps = {
 };
 
 const SPACES_PAGE_SIZE = 10;
-const ITEMS_PAGE_SIZE = 10;
+const ITEMS_PAGE_SIZE = 50;
 /** Upper bound on extra pages fetched while locating a search result. */
 const FOCUS_MAX_PAGE_LOADS = 30;
 const SEARCH_HIGHLIGHT_MS = 2600;
@@ -228,13 +233,47 @@ export const DashboardPage = ({
     { skip: !shouldLoadNotes },
   );
 
-  const tasks = useMemo(() => tasksData?.pages.flatMap((page) => page.tasks) ?? [], [tasksData]);
-  const notes = useMemo(() => notesData?.pages.flatMap((page) => page.notes) ?? [], [notesData]);
+  const tasks = useMemo(() => {
+    const items = tasksData?.pages.flatMap((page) => page.tasks) ?? [];
+    return [...items].sort((a, b) => b.sortAt - a.sortAt);
+  }, [tasksData]);
+  const notes = useMemo(() => {
+    const items = notesData?.pages.flatMap((page) => page.notes) ?? [];
+    return [...items].sort((a, b) => b.sortAt - a.sortAt);
+  }, [notesData]);
 
   const taskCounts = useMemo(() => {
     const done = tasks.filter((task) => completedTaskIds.has(task.id)).length;
     return { all: tasks.length, open: tasks.length - done, done };
   }, [completedTaskIds, tasks]);
+
+  useEffect(() => {
+    if (!shouldLoadTasks || isTasksError || !hasMoreTasks || isTasksLoading || isFetchingMoreTasks) {
+      return;
+    }
+    void fetchNextTasksPage();
+  }, [
+    fetchNextTasksPage,
+    hasMoreTasks,
+    isFetchingMoreTasks,
+    isTasksError,
+    isTasksLoading,
+    shouldLoadTasks,
+  ]);
+
+  useEffect(() => {
+    if (!shouldLoadNotes || isNotesError || !hasMoreNotes || isNotesLoading || isFetchingMoreNotes) {
+      return;
+    }
+    void fetchNextNotesPage();
+  }, [
+    fetchNextNotesPage,
+    hasMoreNotes,
+    isFetchingMoreNotes,
+    isNotesError,
+    isNotesLoading,
+    shouldLoadNotes,
+  ]);
 
   const changeNoteLayout = (layout: NoteLayout) => {
     setNoteLayout(layout);
@@ -888,7 +927,8 @@ export const DashboardPage = ({
 
             <div className="space-detail__toolbar">
               <div
-                className={`space-switch${activeSection === 'notes' ? ' is-notes' : ' is-tasks'}`}
+                className="space-switch space-switch--4"
+                data-section={activeSection}
                 role="tablist"
                 aria-label="Space content"
               >
@@ -921,6 +961,34 @@ export const DashboardPage = ({
                   <FiFileText aria-hidden="true" size={14} />
                   Notes
                 </button>
+                <button
+                  className="space-switch__button"
+                  data-active={activeSection === 'document' ? 'true' : undefined}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSection === 'document'}
+                  onClick={() => {
+                    setActiveSection('document');
+                    setOpenItemMenuId(null);
+                  }}
+                >
+                  <FiFile aria-hidden="true" size={14} />
+                  Document
+                </button>
+                <button
+                  className="space-switch__button"
+                  data-active={activeSection === 'mindmap' ? 'true' : undefined}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSection === 'mindmap'}
+                  onClick={() => {
+                    setActiveSection('mindmap');
+                    setOpenItemMenuId(null);
+                  }}
+                >
+                  <FiGitBranch aria-hidden="true" size={14} />
+                  Mindmap
+                </button>
               </div>
 
               <div className="space-detail__tools">
@@ -941,7 +1009,8 @@ export const DashboardPage = ({
                       </button>
                     ))}
                   </div>
-                ) : (
+                ) : null}
+                {activeSection === 'notes' ? (
                   <div className="segmented-filter segmented-filter--icons" role="group" aria-label="Notes layout">
                     <button
                       type="button"
@@ -960,16 +1029,18 @@ export const DashboardPage = ({
                       <FiList aria-hidden="true" size={14} />
                     </button>
                   </div>
-                )}
+                ) : null}
 
-                <button
-                  className="home-create-button"
-                  type="button"
-                  onClick={() => setCreateModal(activeSection === 'tasks' ? 'task' : 'note')}
-                >
-                  <FiPlus aria-hidden="true" size={15} />
-                  <span>{activeSection === 'tasks' ? 'New task' : 'New note'}</span>
-                </button>
+                {activeSection === 'tasks' || activeSection === 'notes' ? (
+                  <button
+                    className="home-create-button"
+                    type="button"
+                    onClick={() => setCreateModal(activeSection === 'tasks' ? 'task' : 'note')}
+                  >
+                    <FiPlus aria-hidden="true" size={15} />
+                    <span>{activeSection === 'tasks' ? 'New task' : 'New note'}</span>
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -1030,15 +1101,8 @@ export const DashboardPage = ({
                         }
                       />
 
-                      {hasMoreTasks ? (
-                        <button
-                          className="home-load-more home-load-more--panel"
-                          type="button"
-                          disabled={isFetchingMoreTasks}
-                          onClick={() => void fetchNextTasksPage()}
-                        >
-                          {isFetchingMoreTasks ? 'Loading…' : 'Load more tasks'}
-                        </button>
+                      {isFetchingMoreTasks ? (
+                        <p className="home-sync-hint">Loading all tasks…</p>
                       ) : null}
 
                       {isTasksFetching && !isTasksLoading && !isFetchingMoreTasks ? (
@@ -1047,7 +1111,9 @@ export const DashboardPage = ({
                     </>
                   ) : null}
                 </section>
-              ) : (
+              ) : null}
+
+              {activeSection === 'notes' ? (
                 <section className="workspace-card" aria-label="Notes">
                   {showNotesInitialLoading ? (
                     <div className="item-skeletons item-skeletons--grid" aria-busy="true" aria-label="Loading notes">
@@ -1102,15 +1168,8 @@ export const DashboardPage = ({
                         }
                       />
 
-                      {hasMoreNotes ? (
-                        <button
-                          className="home-load-more home-load-more--panel"
-                          type="button"
-                          disabled={isFetchingMoreNotes}
-                          onClick={() => void fetchNextNotesPage()}
-                        >
-                          {isFetchingMoreNotes ? 'Loading…' : 'Load more notes'}
-                        </button>
+                      {isFetchingMoreNotes ? (
+                        <p className="home-sync-hint">Loading all notes…</p>
                       ) : null}
 
                       {isNotesFetching && !isNotesLoading && !isFetchingMoreNotes ? (
@@ -1119,7 +1178,36 @@ export const DashboardPage = ({
                     </>
                   ) : null}
                 </section>
-              )}
+              ) : null}
+
+              {activeSection === 'document' ? (
+                <section className="workspace-card" aria-label="Document">
+                  <DocumentItPage embedded spaceName={selectedSpace.name} />
+                </section>
+              ) : null}
+
+              {activeSection === 'mindmap' ? (
+                <section
+                  className="workspace-card workspace-card--mindmap"
+                  aria-label="Mindmap"
+                >
+                  {userId ? (
+                    <SpaceMindmapSection
+                      userId={userId}
+                      spaceId={selectedSpace.id}
+                      spaceName={selectedSpace.name}
+                    />
+                  ) : (
+                    <div className="home-empty-state">
+                      <span className="home-empty-state__icon">
+                        <FiGitBranch aria-hidden="true" size={20} />
+                      </span>
+                      <h3>Mindmap</h3>
+                      <p>Sign in to view mind maps for {selectedSpace.name}.</p>
+                    </div>
+                  )}
+                </section>
+              ) : null}
             </div>
           </>
         )}

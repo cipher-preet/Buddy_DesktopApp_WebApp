@@ -34,7 +34,7 @@ export type NavigationItem = {
 type AppLayoutProps = {
   children: ReactNode;
   navigationItems: NavigationItem[];
-  viewMode?: 'default' | 'chat' | 'wide';
+  viewMode?: 'default' | 'chat' | 'wide' | 'canvas';
   onOpenSettings?: () => void;
   onSearchNavigate?: (target: SearchNavigationTarget) => void;
 };
@@ -147,8 +147,8 @@ export const AppLayout = ({
   });
   const unreadNotifications = notificationFeed?.unreadCount ?? 0;
   const { startListening, isStarting, isVisible: isRecordingVisible } = useRecording();
-  const isChatView = viewMode === 'chat';
-  const hideSidePanel = viewMode === 'chat' || viewMode === 'wide';
+  const isChatView = viewMode === 'chat' || viewMode === 'canvas';
+  const hideSidePanel = viewMode === 'chat' || viewMode === 'wide' || viewMode === 'canvas';
 
   const openListeningPicker = () => {
     if (

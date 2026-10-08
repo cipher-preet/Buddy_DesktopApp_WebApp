@@ -12,6 +12,7 @@
     .app-sidebar,
     .meeting-panel,
     .app-content[data-view-mode='chat'],
+    .app-content[data-view-mode='canvas'],
     .ai-chat-page:not(.ai-chat-page--panel) {
       height: 100dvh;
     }

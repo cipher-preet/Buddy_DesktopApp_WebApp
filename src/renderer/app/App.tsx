@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
-import { FiCalendar, FiGrid, FiHome, FiSettings, FiVideo } from 'react-icons/fi';
+import {
+  FiCalendar,
+  FiFileText,
+  FiGitBranch,
+  FiGrid,
+  FiHome,
+  FiSettings,
+  FiTarget,
+  FiVideo,
+} from 'react-icons/fi';
 import { RiRobot2Line } from 'react-icons/ri';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { RecordingProvider } from '@/app/RecordingProvider';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { GlobalRecordingBar } from '@/components/recording/GlobalRecordingBar';
+import { AchieveGoalPage } from '@/features/achieve-goal/AchieveGoalPage';
 import { AiChatPage } from '@/features/ai-chat/AiChatPage';
 import { AuthPage } from '@/features/auth/AuthPage';
 import {
@@ -17,8 +27,10 @@ import { bootstrapAuthSession } from '@/features/auth/bootstrapAuthSession';
 import { readAuthSession } from '@/features/auth/authStorage';
 import { CalendarPage } from '@/features/calendar/CalendarPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { DocumentItPage } from '@/features/document-it/DocumentItPage';
 import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
 import { MeetingsPage } from '@/features/meetings/MeetingsPage';
+import { MindmapPage } from '@/features/mindmap/MindmapPage';
 import { PlanGateProvider } from '@/features/settings/PlanGateProvider';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import type {
@@ -29,20 +41,82 @@ import type {
 } from '@/features/search/searchTypes';
 import { useLazyCheckAuthQuery, api } from '@/services/api';
 
-type AppRoute = 'home' | 'ai-chat' | 'meetings' | 'calendar' | 'integrations' | 'settings';
+type AppRoute =
+  | 'home'
+  | 'ai-chat'
+  | 'achieve-goal'
+  | 'mindmap'
+  | 'document-it'
+  | 'meetings'
+  | 'calendar'
+  | 'integrations'
+  | 'settings';
+
+const APP_ROUTES: readonly AppRoute[] = [
+  'home',
+  'ai-chat',
+  'achieve-goal',
+  'mindmap',
+  'document-it',
+  'meetings',
+  'calendar',
+  'integrations',
+  'settings',
+] as const;
+
+const isAppRoute = (value: string): value is AppRoute =>
+  (APP_ROUTES as readonly string[]).includes(value);
+
+const readRouteFromHash = (): AppRoute => {
+  if (typeof window === 'undefined') {
+    return 'home';
+  }
+  const raw = window.location.hash.replace(/^#\/?/, '').split(/[/?#]/)[0] ?? '';
+  return isAppRoute(raw) ? raw : 'home';
+};
+
+const writeRouteToHash = (route: AppRoute) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const next = `#/${route}`;
+  if (window.location.hash !== next) {
+    window.location.hash = next;
+  }
+};
+
 type HomeSectionFocus = 'notes' | 'tasks' | 'spaces';
 type SettingsFocus = 'plans' | null;
 
 export const App = () => {
   const dispatch = useAppDispatch();
   const authStatus = useAppSelector((state) => state.auth.status);
-  const [activeRoute, setActiveRoute] = useState<AppRoute>('home');
+  const [activeRoute, setActiveRouteState] = useState<AppRoute>(() => readRouteFromHash());
   const [homeSectionFocus, setHomeSectionFocus] = useState<HomeSectionFocus | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocus>(null);
   const [dashboardTarget, setDashboardTarget] = useState<DashboardFocusTarget | null>(null);
   const [meetingTarget, setMeetingTarget] = useState<MeetingFocusTarget | null>(null);
   const [calendarTarget, setCalendarTarget] = useState<CalendarFocusTarget | null>(null);
   const [checkAuth] = useLazyCheckAuthQuery();
+
+  const setActiveRoute = (route: AppRoute) => {
+    setActiveRouteState(route);
+    writeRouteToHash(route);
+  };
+
+  useEffect(() => {
+    writeRouteToHash(activeRoute);
+
+    const handleHashChange = () => {
+      const nextRoute = readRouteFromHash();
+      setActiveRouteState((current) => (current === nextRoute ? current : nextRoute));
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+    // Sync listener once; route writes go through setActiveRoute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSearchNavigate = (target: SearchNavigationTarget) => {
     const nonce = Date.now();
@@ -134,6 +208,24 @@ export const App = () => {
       onSelect: () => setActiveRoute('ai-chat'),
     },
     {
+      label: 'Achieve Goal',
+      icon: FiTarget,
+      isActive: activeRoute === 'achieve-goal',
+      onSelect: () => setActiveRoute('achieve-goal'),
+    },
+    {
+      label: 'Document it',
+      icon: FiFileText,
+      isActive: activeRoute === 'document-it',
+      onSelect: () => setActiveRoute('document-it'),
+    },
+    {
+      label: 'Mindmap',
+      icon: FiGitBranch,
+      isActive: activeRoute === 'mindmap',
+      onSelect: () => setActiveRoute('mindmap'),
+    },
+    {
       label: 'Meetings',
       icon: FiVideo,
       isActive: activeRoute === 'meetings',
@@ -188,6 +280,9 @@ export const App = () => {
       />
     ),
     'ai-chat': <AiChatPage />,
+    'achieve-goal': <AchieveGoalPage />,
+    mindmap: <MindmapPage />,
+    'document-it': <DocumentItPage />,
     meetings: <MeetingsPage focusTarget={meetingTarget} onFocusTargetHandled={() => setMeetingTarget(null)} />,
     calendar: <CalendarPage focusTarget={calendarTarget} onFocusTargetHandled={() => setCalendarTarget(null)} />,
     integrations: <IntegrationsPage />,
@@ -204,12 +299,21 @@ export const App = () => {
     ),
   }[activeRoute];
 
+  const viewMode =
+    activeRoute === 'ai-chat'
+      ? 'chat'
+      : activeRoute === 'mindmap'
+        ? 'canvas'
+        : activeRoute === 'meetings'
+          ? 'wide'
+          : 'default';
+
   return (
     <PlanGateProvider onOpenPlans={openPlans}>
       <RecordingProvider>
         <AppLayout
           navigationItems={navigationItems}
-          viewMode={activeRoute === 'ai-chat' ? 'chat' : activeRoute === 'meetings' ? 'wide' : 'default'}
+          viewMode={viewMode}
           onOpenSettings={() => setActiveRoute('settings')}
           onSearchNavigate={handleSearchNavigate}
         >
