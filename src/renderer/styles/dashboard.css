@@ -768,16 +768,13 @@
 }
 
 .note-card__header h3 {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
   margin-top: 5px;
   color: var(--color-text);
   font-size: 0.875rem;
   font-weight: var(--font-weight-semibold);
   line-height: 1.4;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .note-card__actions {
@@ -790,22 +787,77 @@
 }
 
 .note-card__excerpt {
+  display: grid;
+  gap: 8px;
   flex: 0 1 auto;
+  min-width: 0;
   color: #5b6577;
   font-size: var(--font-size-sm);
   line-height: 1.6;
-  white-space: pre-line;
+  overflow: visible;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .note-card__excerpt.is-full {
-  display: block;
   overflow: visible;
 }
 
 .note-card__excerpt.is-empty {
   color: var(--color-text-soft);
   font-style: italic;
+}
+
+.note-card__excerpt.is-loading {
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.note-card__excerpt.is-loading span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f2f4f7 0%, #e9edf3 50%, #f2f4f7 100%);
+  background-size: 200% 100%;
+  animation: item-skeleton-shimmer 1.1s ease-in-out infinite;
+}
+
+.note-card__excerpt.is-loading span:nth-child(2) {
+  width: 88%;
+}
+
+.note-card__excerpt.is-loading span:nth-child(3) {
+  width: 64%;
+}
+
+.note-card__paragraph {
+  margin: 0;
+}
+
+.note-card__bullets {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note-card__bullets li {
+  position: relative;
+  padding-left: 14px;
+  color: #5b6577;
+}
+
+.note-card__bullets li::before {
+  content: '';
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 72%, #98a2b3);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-soft) 80%, #fff);
 }
 
 .note-card__load-error {
@@ -850,10 +902,6 @@
 .note-board[data-layout='list'] .note-card {
   min-height: 0;
   padding: 12px 12px 10px 14px;
-}
-
-.note-board[data-layout='list'] .note-card__excerpt {
-  -webkit-line-clamp: 2;
 }
 
 /* ---------- Loading ---------- */

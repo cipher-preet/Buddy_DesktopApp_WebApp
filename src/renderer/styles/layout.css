@@ -718,7 +718,9 @@
 
 .nav-list {
   display: grid;
-  gap: var(--space-1);
+  align-content: start;
+  align-items: stretch;
+  gap: 6px;
   flex: 1 1 auto;
   min-height: 0;
   margin-bottom: var(--space-3);
@@ -757,7 +759,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
+  min-height: 36px;
+  height: 36px;
   padding: 0 12px;
   border-radius: 11px;
   color: #344054;
@@ -837,9 +840,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: 12px;
   min-width: 0;
-  padding: 0 12px;
+  height: var(--header-height);
+  padding: 0 var(--header-padding-x);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
 }
@@ -883,7 +887,7 @@
 .header-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -920,8 +924,8 @@
   flex-direction: column;
   width: 100%;
   max-width: none;
-  padding-block: clamp(10px, 1vw, 18px);
-  padding-inline: clamp(10px, 1.4vw, 22px);
+  padding-block: var(--content-padding-y);
+  padding-inline: var(--content-padding-x);
 }
 
 .app-content[data-view-mode='wide'] > * {
@@ -972,18 +976,31 @@
     visibility 0ms linear 360ms;
 }
 
+/* Keep the shell compact on wide monitors — padding must not scale up with viewport. */
+@media (min-width: 1440px) {
+  :root {
+    --header-padding-x: 16px;
+    --content-padding-x: 16px;
+    --content-padding-y: 16px;
+  }
+}
+
 @media (max-width: 1280px) {
   :root {
     --meeting-panel-width: 360px;
-    --content-padding-x: 22px;
+    --header-padding-x: 14px;
+    --content-padding-x: 14px;
+    --content-padding-y: 16px;
   }
+
 }
 
 @media (max-width: 1100px) {
   :root {
     --meeting-panel-width: min(380px, 92vw);
-    --content-padding-x: 18px;
-    --content-padding-y: 18px;
+    --header-padding-x: 12px;
+    --content-padding-x: 14px;
+    --content-padding-y: 14px;
   }
 }
 
@@ -1039,8 +1056,9 @@
 @media (max-width: 900px) {
   :root {
     --header-height: 60px;
-    --content-padding-x: 16px;
-    --content-padding-y: 16px;
+    --header-padding-x: 10px;
+    --content-padding-x: 14px;
+    --content-padding-y: 14px;
   }
 
   .app-shell {
@@ -1123,18 +1141,25 @@
     padding-inline: 10px;
   }
 
+  .nav-list {
+    gap: 6px;
+  }
+
+  .nav-list__item,
+  .sidebar-link {
+    min-height: 40px;
+    height: 40px;
+  }
+
   .app-main {
     min-width: 0;
     width: 100%;
   }
 
   .app-header {
-    gap: 10px;
-    padding: 0 10px 0 8px;
-  }
-
-  .search-field kbd {
-    display: none;
+    gap: 8px;
+    height: var(--header-height);
+    padding: 0 var(--header-padding-x);
   }
 
   .notifications-dropdown {
@@ -1145,6 +1170,7 @@
 @media (max-width: 640px) {
   :root {
     --header-height: 56px;
+    --header-padding-x: 8px;
     --content-padding-x: 12px;
     --content-padding-y: 12px;
     --meeting-panel-width: min(100vw, 100%);
@@ -1152,8 +1178,8 @@
 
   .app-header {
     min-height: var(--header-height);
-    height: auto;
-    padding: 8px;
+    height: var(--header-height);
+    padding: 0 var(--header-padding-x);
   }
 
   .app-header__leading {
@@ -1213,4 +1239,37 @@
   background: var(--color-bg);
   color: var(--color-text-muted);
   font-size: 0.95rem;
+}
+
+/* Desktop: native title bar is hidden — keep the window draggable and clear Win controls. */
+html[data-desktop='true'] .app-sidebar {
+  padding-top: 14px;
+}
+
+html[data-desktop='true'] .sidebar-topbar,
+html[data-desktop='true'] .app-header {
+  -webkit-app-region: drag;
+}
+
+html[data-desktop='true'] .sidebar-topbar button,
+html[data-desktop='true'] .sidebar-topbar a,
+html[data-desktop='true'] .app-header button,
+html[data-desktop='true'] .app-header a,
+html[data-desktop='true'] .app-header input,
+html[data-desktop='true'] .app-header .global-search,
+html[data-desktop='true'] .app-header .search-field {
+  -webkit-app-region: no-drag;
+}
+
+html[data-desktop='true'] .app-header {
+  justify-content: space-between;
+  /* Keep Record on the far right, just left of Windows min/max/close. */
+  padding-right: max(
+    138px,
+    calc(100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px) + 12px)
+  );
+}
+
+html[data-desktop='true'] .header-actions {
+  margin-left: auto;
 }

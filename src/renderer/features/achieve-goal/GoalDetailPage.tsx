@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   FiArrowRight,
-  FiBarChart2,
   FiEdit2,
   FiFileText,
   FiMoreVertical,
@@ -13,7 +12,6 @@ import {
   getGoalDetail,
   tickDummyDashboard,
   type GoalChartPoint,
-  type GoalMetric,
 } from './goalDetailData';
 
 import './goal-detail.css';
@@ -46,102 +44,27 @@ const smoothPath = (points: Point[]) => {
   return path;
 };
 
-const splitGaugeCaption = (label: string) => {
-  const match = label.match(/^(.*?)(\s*\(\d{4}\))\s*$/);
-  if (match?.[1] && match[2]) {
-    return [match[1].trim(), match[2].trim()];
-  }
-  return [label];
-};
-
-const ProgressGauge = ({
-  score,
-  label,
-  metrics,
-  activeId,
-  onActiveIdChange,
-}: {
-  score: number;
-  label: string;
-  metrics: GoalMetric[];
-  activeId: string | null;
-  onActiveIdChange: (id: string | null) => void;
-}) => {
-  const cx = 130;
-  const cy = 116;
-  const stroke = 9;
-  const radii = [98, 80, 62];
-  const caption = splitGaugeCaption(label);
-  const arcs = metrics.slice(0, 3).map((metric, index) => ({
-    ...metric,
-    radius: radii[index] ?? 62,
-    progress: Math.max(4, Math.min(metric.value, 100)),
-  }));
-
-  return (
-    <div className="gd-gauge" aria-label={`${formatPercent(score)} ${label}`}>
-      <svg viewBox="0 0 260 186" role="img">
-        {arcs.map((arc) => {
-          const d = `M ${cx - arc.radius} ${cy} A ${arc.radius} ${arc.radius} 0 0 1 ${cx + arc.radius} ${cy}`;
-          const dimmed = Boolean(activeId && activeId !== arc.id);
-          return (
-            <g key={arc.id}>
-              <path d={d} fill="none" stroke="#e6eaF0" strokeWidth={stroke} strokeLinecap="round" />
-              <path
-                className="gd-gauge__fill"
-                d={d}
-                fill="none"
-                stroke={arc.color}
-                strokeWidth={stroke}
-                strokeLinecap="round"
-                pathLength={100}
-                strokeDasharray={`${arc.progress} 100`}
-                opacity={dimmed ? 0.28 : 1}
-              />
-              <path
-                d={d}
-                fill="none"
-                stroke="transparent"
-                strokeWidth={18}
-                strokeLinecap="round"
-                onMouseEnter={() => onActiveIdChange(arc.id)}
-                onMouseLeave={() => onActiveIdChange(null)}
-              />
-            </g>
-          );
-        })}
-        <text className="gd-gauge__score" x={cx} y={cy + 6} textAnchor="middle">
-          {formatPercent(score)}
-        </text>
-        {caption.map((line, index) => (
-          <text
-            key={line}
-            className="gd-gauge__caption"
-            x={cx}
-            y={cy + 28 + index * 14}
-            textAnchor="middle"
-          >
-            {line}
-          </text>
-        ))}
-      </svg>
-    </div>
-  );
-};
-
 const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: string[] }) => {
   const gradientId = useId().replace(/:/g, '');
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [size, setSize] = useState({ width: 760, height: 300 });
+  const [size, setSize] = useState({ width: 760, height: 380 });
 
   useEffect(() => {
     const node = wrapRef.current;
     if (!node) return undefined;
 
     const update = () => {
-      const next = node.getBoundingClientRect();
-      setSize({ width: Math.max(280, next.width), height: 300 });
+      const width = Math.max(240, node.clientWidth);
+      const legend = node.querySelector('.gd-chart__legend');
+      const legendHeight = legend instanceof HTMLElement ? legend.offsetHeight + 12 : 36;
+      // Fill the stage on tall screens so Strategies can sit on the remaining space (no dead gap).
+      const available = Math.max(220, node.clientHeight - legendHeight);
+      const byWidth = Math.round(Math.max(220, width * 0.46));
+      const height = Math.round(Math.min(560, Math.max(byWidth, available)));
+      setSize((current) =>
+        current.width === width && current.height === height ? current : { width, height },
+      );
     };
 
     update();
@@ -200,6 +123,8 @@ const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: st
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
         role="img"
         aria-label="Real reduction versus targeted reduction"
         onMouseMove={(event) => setHoverIndex(readIndex(event.clientX, event.currentTarget))}
@@ -301,7 +226,6 @@ const TrendArrow = ({ direction }: { direction: 'down' | 'up' }) => (
 export const GoalDetailPage = ({ goalId }: GoalDetailPageProps) => {
   const detail = useMemo(() => getGoalDetail(goalId), [goalId]);
   const [live, setLive] = useState(() => createDummyDashboard(goalId));
-  const [activeMetricId, setActiveMetricId] = useState<string | null>(null);
   const [canScrollNext, setCanScrollNext] = useState(false);
   const strategiesRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -344,47 +268,9 @@ export const GoalDetailPage = ({ goalId }: GoalDetailPageProps) => {
   return (
     <section className="gd-page" aria-label={`${detail.title} dashboard`}>
       <div className="gd-body">
-        <aside className="gd-sidebar">
-          <div className="gd-summary">
-            <h2>Summary</h2>
-            <p>{detail.summarySubtitle}</p>
-          </div>
-
-          <ProgressGauge
-            score={live.overallScore}
-            label={detail.overallLabel}
-            metrics={live.metrics}
-            activeId={activeMetricId}
-            onActiveIdChange={setActiveMetricId}
-          />
-
-          <ul className="gd-metric-list">
-            {live.metrics.map((metric) => (
-              <li
-                key={metric.id}
-                className={activeMetricId === metric.id ? 'is-active' : undefined}
-                onMouseEnter={() => setActiveMetricId(metric.id)}
-                onMouseLeave={() => setActiveMetricId(null)}
-              >
-                <span style={{ color: metric.color }}>{metric.label}</span>
-                <strong style={{ color: metric.color }}>{formatPercent(metric.value)}</strong>
-              </li>
-            ))}
-          </ul>
-
-          <button
-            type="button"
-            className="gd-results-btn"
-            onClick={() => {
-              mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          >
-            <FiBarChart2 size={16} strokeWidth={2} aria-hidden="true" />
-            <span>Show full results</span>
-          </button>
-
+        <aside className="gd-sidebar" aria-label="Recommended steps">
           <div className="gd-steps-block">
-            <h3>Recommended steps</h3>
+            <h2>Recommended steps</h2>
             <ol className="gd-steps">
               {detail.steps.map((step) => (
                 <li key={step.id}>
@@ -406,27 +292,8 @@ export const GoalDetailPage = ({ goalId }: GoalDetailPageProps) => {
 
         <div className="gd-main" ref={mainRef}>
           <div className="gd-main__top">
-            <section className="gd-stage" aria-label="Your target">
-              <h2>Your target</h2>
-
-              <div className="gd-target-bars">
-                {live.targetMetrics.map((metric) => (
-                  <div key={metric.id} className="gd-target-bar">
-                    <div className="gd-target-bar__label" style={{ color: metric.color }}>
-                      {metric.label}
-                    </div>
-                    <div className="gd-target-bar__track" aria-hidden="true">
-                      <span style={{ width: `${metric.fill}%`, background: metric.color }} />
-                    </div>
-                    <div className="gd-target-bar__values" style={{ color: metric.color }}>
-                      <span>{formatPercent(metric.current)}</span>
-                      <span>{formatPercent(metric.target)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <h3 className="gd-chart-title">Real reduction vs. Targeted reduction</h3>
+            <section className="gd-stage" aria-label="Reduction chart">
+              <h2 className="gd-chart-title">Real reduction vs. Targeted reduction</h2>
               <ReductionChart points={live.chart.points} years={live.chart.years} />
             </section>
 

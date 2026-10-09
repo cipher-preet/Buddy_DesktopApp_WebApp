@@ -1,5 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { FiCalendar, FiFileText } from 'react-icons/fi';
+
+import { useGetNoteByIdQuery } from '@/services/homeApi';
 
 import { groupItemsByDate } from './homeMappers';
 import { ItemActionsMenu } from './ItemActionsMenu';
@@ -8,6 +10,7 @@ import type { WorkspaceNote } from './homeTypes';
 export type NoteLayout = 'grid' | 'list';
 
 const ACCENTS = ['indigo', 'violet', 'teal', 'amber', 'rose', 'sky'] as const;
+const BULLET_LINE = /^\s*(?:[-*•▪◦]|\d+[.)])\s+(.*)$/;
 
 const accentFor = (id: string) => {
   let hash = 0;
@@ -15,6 +18,99 @@ const accentFor = (id: string) => {
     hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
   }
   return ACCENTS[hash % ACCENTS.length];
+};
+
+/** Turns plain "-" / "*" markdown bullets into styled dots for note cards. */
+const renderNoteExcerpt = (excerpt: string): ReactNode => {
+  const lines = excerpt.replace(/\r\n/g, '\n').split('\n');
+  const blocks: ReactNode[] = [];
+  let bulletBuffer: string[] = [];
+  let key = 0;
+
+  const flushBullets = () => {
+    if (bulletBuffer.length === 0) {
+      return;
+    }
+
+    blocks.push(
+      <ul className="note-card__bullets" key={`bullets-${key}`}>
+        {bulletBuffer.map((item, index) => (
+          <li key={`${key}-${index}`}>{item}</li>
+        ))}
+      </ul>,
+    );
+    key += 1;
+    bulletBuffer = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushBullets();
+      return;
+    }
+
+    const bulletMatch = trimmed.match(BULLET_LINE);
+    if (bulletMatch) {
+      bulletBuffer.push(bulletMatch[1].trim());
+      return;
+    }
+
+    flushBullets();
+    blocks.push(
+      <p className="note-card__paragraph" key={`p-${key}`}>
+        {trimmed}
+      </p>,
+    );
+    key += 1;
+  });
+
+  flushBullets();
+  return blocks.length > 0 ? blocks : excerpt;
+};
+
+type NoteCardBodyProps = {
+  note: WorkspaceNote;
+  spaceId: string;
+};
+
+const NoteCardBody = ({ note, spaceId }: NoteCardBodyProps) => {
+  const { data: fullNote, isFetching, isError, refetch } = useGetNoteByIdQuery(
+    { noteId: note.id, spaceId },
+    { skip: !note.isTruncated || !spaceId },
+  );
+
+  const body = (fullNote?.body?.trim() || note.excerpt).trim();
+
+  if (!body && !note.isTruncated) {
+    return <p className="note-card__excerpt is-empty">No content yet.</p>;
+  }
+
+  if (note.isTruncated && isFetching && !fullNote) {
+    return (
+      <div className="note-card__excerpt is-loading" aria-busy="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    );
+  }
+
+  if (note.isTruncated && isError && !fullNote) {
+    return (
+      <div className="note-card__excerpt">
+        <p className="note-card__paragraph">{note.excerpt}</p>
+        <p className="note-card__load-error">
+          Couldn’t load the full note.{' '}
+          <button type="button" onClick={() => void refetch()}>
+            Retry
+          </button>
+        </p>
+      </div>
+    );
+  }
+
+  return <div className="note-card__excerpt is-full">{renderNoteExcerpt(body)}</div>;
 };
 
 type NoteBoardProps = {
@@ -30,7 +126,7 @@ type NoteBoardProps = {
 
 export const NoteBoard = ({
   notes,
-  spaceId: _spaceId,
+  spaceId,
   layout,
   openItemMenuId,
   searchHitId,
@@ -86,11 +182,7 @@ export const NoteBoard = ({
                       />
                     </div>
                   </header>
-                  {note.excerpt ? (
-                    <p className="note-card__excerpt is-full">{note.excerpt}</p>
-                  ) : (
-                    <p className="note-card__excerpt is-empty">No content yet.</p>
-                  )}
+                  <NoteCardBody note={note} spaceId={spaceId} />
                   <footer className="note-card__footer">
                     <span>
                       <FiCalendar aria-hidden="true" size={12} />
