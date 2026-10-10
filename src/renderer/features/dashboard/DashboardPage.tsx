@@ -1182,7 +1182,11 @@ export const DashboardPage = ({
 
               {activeSection === 'document' ? (
                 <section className="workspace-card" aria-label="Document">
-                  <DocumentItPage embedded spaceName={selectedSpace.name} />
+                  <DocumentItPage
+                    embedded
+                    spaceId={selectedSpace.id}
+                    spaceName={selectedSpace.name}
+                  />
                 </section>
               ) : null}
 

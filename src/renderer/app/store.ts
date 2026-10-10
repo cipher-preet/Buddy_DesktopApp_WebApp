@@ -6,6 +6,8 @@ import { shareReducer } from '@/features/share/shareSlice';
 import { api } from '@/services/api';
 import '@/services/calendarApi';
 import '@/services/chatApi';
+import '@/services/documentTemplatesApi';
+import '@/services/documentsApi';
 import '@/services/homeApi';
 import '@/services/meetingsApi';
 import '@/services/notificationsApi';

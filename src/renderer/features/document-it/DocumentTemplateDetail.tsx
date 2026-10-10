@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   FiArrowLeft,
   FiCheck,
   FiChevronDown,
+  FiDownload,
   FiFolder,
   FiSearch,
   FiShare2,
@@ -11,9 +12,17 @@ import {
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { useToast } from '@/app/ToastProvider';
+import { getStoredAuthToken } from '@/features/auth/authStorage';
+import { getApiErrorMessage } from '@/services/apiErrors';
+import {
+  subscribeToDocumentStatusEvents,
+  type DocumentStatusEvent,
+} from '@/services/documentStatusEvents';
+import { documentsApi, useGenerateDocumentMutation } from '@/services/documentsApi';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
+import { DEFAULT_API_BASE_URL } from '@shared/constants/app';
 
 import type { DocumentTemplate } from './documentTemplates';
 
@@ -21,21 +30,81 @@ type DocumentTemplateDetailProps = {
   template: DocumentTemplate;
   Icon: IconType;
   onBack: () => void;
+  /** When opened from a space Document tab, pre-select that space. */
+  initialSpaceId?: string;
+  initialSpaceName?: string;
 };
 
-export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTemplateDetailProps) => {
+type GenerationStatus = {
+  jobId: string;
+  documentId: string;
+  status: string;
+  stage?: string;
+  progress?: number;
+  message?: string;
+  error?: string | null;
+  fileName?: string | null;
+};
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+
+const downloadGeneratedDocx = async (documentId: string, fileName?: string | null) => {
+  const token = getStoredAuthToken();
+  const response = await fetch(`${apiBase}/documents/${encodeURIComponent(documentId)}/download`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    let detail = `Download failed (${response.status})`;
+    try {
+      const payload = (await response.json()) as { detail?: string; message?: string };
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName || 'document.docx';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+};
+
+export const DocumentTemplateDetail = ({
+  template,
+  Icon,
+  onBack,
+  initialSpaceId,
+  initialSpaceName,
+}: DocumentTemplateDetailProps) => {
   const { showToast } = useToast();
+  const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
   const userId = user?.userId || '';
   const displayName = user?.name || user?.email || 'KukuNotes';
   const pickerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [spaceQuery, setSpaceQuery] = useState('');
-  const [selectedSpaceIds, setSelectedSpaceIds] = useState<string[]>([]);
-  const [confirmedSpaces, setConfirmedSpaces] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(initialSpaceId || null);
+  const [confirmedSpace, setConfirmedSpace] = useState<{ id: string; name: string } | null>(
+    initialSpaceId && initialSpaceName ? { id: initialSpaceId, name: initialSpaceName } : null,
+  );
   const [pickerStyle, setPickerStyle] = useState<CSSProperties>({});
+  const [generation, setGeneration] = useState<GenerationStatus | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const [generateDocument, { isLoading: isStartingGenerate }] = useGenerateDocumentMutation();
 
   const {
     data: spacesData,
@@ -61,7 +130,19 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
     );
   }, [spaceQuery, spaces]);
 
-  const hasConfirmedSpaces = confirmedSpaces.length > 0;
+  const hasConfirmedSpace = Boolean(confirmedSpace);
+  const isGenerating =
+    Boolean(generation) && generation?.status !== 'READY' && generation?.status !== 'FAILED';
+  const generationFailed = generation?.status === 'FAILED';
+  const generationReady = generation?.status === 'READY';
+  const progress = Math.max(0, Math.min(100, generation?.progress ?? 0));
+
+  const stopGenerationStream = useCallback(() => {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+  }, []);
+
+  useEffect(() => () => stopGenerationStream(), [stopGenerationStream]);
 
   const updatePickerPosition = () => {
     const trigger = triggerRef.current;
@@ -128,66 +209,176 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
       window.removeEventListener('resize', handleReposition);
       window.removeEventListener('scroll', handleReposition, true);
     };
-  }, [isPickerOpen, confirmedSpaces.length]);
+  }, [isPickerOpen, confirmedSpace?.id]);
 
   const togglePicker = () => {
+    if (isGenerating) {
+      return;
+    }
     if (isPickerOpen) {
       setIsPickerOpen(false);
       setSpaceQuery('');
       return;
     }
-    setSelectedSpaceIds(confirmedSpaces.map((space) => space.id));
+    setSelectedSpaceId(confirmedSpace?.id ?? null);
     setSpaceQuery('');
-    // Position first so the menu is fully visible even when selected chips push the button down.
     requestAnimationFrame(() => {
       updatePickerPosition();
       setIsPickerOpen(true);
     });
   };
 
-  const toggleSpace = (spaceId: string) => {
-    setSelectedSpaceIds((current) =>
-      current.includes(spaceId)
-        ? current.filter((id) => id !== spaceId)
-        : [...current, spaceId],
-    );
-  };
-
-  const handleConfirmSpaces = () => {
-    if (selectedSpaceIds.length === 0) {
-      showToast({ message: 'Select at least one space.', type: 'error' });
+  const handleConfirmSpace = () => {
+    if (!selectedSpaceId) {
+      showToast({ message: 'Select one space.', type: 'error' });
       return;
     }
-    const next = selectedSpaceIds.map((id) => {
-      const match = spaces.find((space) => space.id === id);
-      const existing = confirmedSpaces.find((space) => space.id === id);
-      return { id, name: match?.name ?? existing?.name ?? 'Selected space' };
-    });
-    setConfirmedSpaces(next);
+    const match = spaces.find((space) => space.id === selectedSpaceId);
+    const name = match?.name ?? confirmedSpace?.name ?? 'Selected space';
+    setConfirmedSpace({ id: selectedSpaceId, name });
     setIsPickerOpen(false);
     setSpaceQuery('');
   };
 
-  const removeConfirmedSpace = (spaceId: string) => {
-    setConfirmedSpaces((current) => current.filter((space) => space.id !== spaceId));
-    setSelectedSpaceIds((current) => current.filter((id) => id !== spaceId));
-  };
-
-  const handleDocumentIt = () => {
-    if (confirmedSpaces.length === 0) {
-      showToast({ message: 'Select at least one space first.', type: 'error' });
+  const clearConfirmedSpace = () => {
+    if (isGenerating) {
       return;
     }
-    const names = confirmedSpaces.map((space) => space.name).join(', ');
-    showToast({
-      message: `Document it is ready for ${confirmedSpaces.length} space${confirmedSpaces.length === 1 ? '' : 's'}: ${names}. Generation comes next.`,
-      type: 'success',
+    setConfirmedSpace(null);
+    setSelectedSpaceId(null);
+  };
+
+  const handleStatusEvent = useCallback(
+    (event: DocumentStatusEvent) => {
+      setGeneration((current) => {
+        if (!current) {
+          return current;
+        }
+        if (event.documentId && current.documentId && event.documentId !== current.documentId) {
+          return current;
+        }
+        return {
+          ...current,
+          jobId: event.jobId || current.jobId,
+          documentId: event.documentId || current.documentId,
+          status: event.status || current.status,
+          stage: event.stage || current.stage,
+          progress: event.progress ?? current.progress,
+          message: event.message || current.message,
+          error: event.error ?? current.error,
+        };
+      });
+
+      if (event.status === 'READY' && event.documentId && userId && confirmedSpace?.id) {
+        dispatch(
+          documentsApi.util.invalidateTags([
+            { type: 'SpaceDocuments', id: `${userId}:${confirmedSpace.id}` },
+          ]),
+        );
+        showToast({
+          message: `${template.title} is ready. You can download the Word document.`,
+          type: 'success',
+        });
+      }
+    },
+    [confirmedSpace?.id, dispatch, showToast, template.title, userId],
+  );
+
+  const handleDocumentIt = async () => {
+    if (!userId) {
+      showToast({ message: 'Sign in to generate a document.', type: 'error' });
+      return;
+    }
+    if (!confirmedSpace) {
+      showToast({ message: 'Select one space first.', type: 'error' });
+      return;
+    }
+    if (isGenerating || isStartingGenerate) {
+      return;
+    }
+
+    stopGenerationStream();
+    setGeneration({
+      jobId: '',
+      documentId: '',
+      status: 'QUEUED',
+      stage: 'queued',
+      progress: 5,
+      message: 'Starting generation…',
     });
+
+    try {
+      const result = await generateDocument({
+        userId,
+        spaceId: confirmedSpace.id,
+        templateCode: template.id,
+      }).unwrap();
+
+      setGeneration({
+        jobId: result.jobId,
+        documentId: result.documentId,
+        status: result.status,
+        stage: result.stage,
+        progress: result.progress,
+        message: result.message,
+      });
+
+      unsubscribeRef.current = subscribeToDocumentStatusEvents({
+        userId,
+        spaceId: confirmedSpace.id,
+        jobId: result.jobId,
+        documentId: result.documentId,
+        token: getStoredAuthToken(),
+        onStatusChange: handleStatusEvent,
+        onError: (error) => {
+          const message =
+            error instanceof Error ? error.message : 'Status stream interrupted';
+          setGeneration((current) =>
+            current
+              ? {
+                  ...current,
+                  status: current.status === 'READY' ? current.status : 'FAILED',
+                  error: message,
+                  message: current.status === 'READY' ? current.message : 'Generation failed',
+                }
+              : current,
+          );
+        },
+      });
+    } catch (error) {
+      const message = getApiErrorMessage(error, 'Unable to start document generation');
+      setGeneration({
+        jobId: '',
+        documentId: '',
+        status: 'FAILED',
+        message: 'Generation failed',
+        error: message,
+      });
+      showToast({ message, type: 'error' });
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!generation?.documentId) {
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      await downloadGeneratedDocx(generation.documentId, generation.fileName);
+      showToast({ message: 'Download started.', type: 'success' });
+    } catch (error) {
+      showToast({
+        message: error instanceof Error ? error.message : 'Unable to download document',
+        type: 'error',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
     <div className="document-detail">
-      <button type="button" className="document-detail__back" onClick={onBack}>
+      <button type="button" className="document-detail__back" onClick={onBack} disabled={isGenerating}>
         <FiArrowLeft aria-hidden="true" size={16} />
         Back to templates
       </button>
@@ -203,33 +394,70 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
           <p>{template.tagline}</p>
 
           <div className="document-detail__actions">
-            {hasConfirmedSpaces ? (
+            {confirmedSpace ? (
               <div className="document-detail__selected-list">
-                {confirmedSpaces.map((space) => (
-                  <span key={space.id} className="document-detail__tag">
-                    {space.name}
+                <span className="document-detail__tag">
+                  {confirmedSpace.name}
+                  {!isGenerating ? (
                     <button
                       type="button"
                       className="document-detail__tag-remove"
-                      aria-label={`Remove ${space.name}`}
-                      onClick={() => removeConfirmedSpace(space.id)}
+                      aria-label={`Remove ${confirmedSpace.name}`}
+                      onClick={clearConfirmedSpace}
                     >
                       <FiX aria-hidden="true" size={12} />
                     </button>
-                  </span>
-                ))}
+                  ) : null}
+                </span>
+              </div>
+            ) : null}
+
+            {generation ? (
+              <div className="document-generate-status" role="status" aria-live="polite">
+                <p className="document-generate-status__label">
+                  {generationFailed
+                    ? 'Generation failed'
+                    : generationReady
+                      ? 'Document ready'
+                      : generation.message || 'Generating document…'}
+                </p>
+                {!generationFailed && !generationReady ? (
+                  <div className="document-generate-status__bar" aria-hidden="true">
+                    <span style={{ width: `${progress}%` }} />
+                  </div>
+                ) : null}
+                {generation.stage && !generationFailed && !generationReady ? (
+                  <p className="document-generate-status__meta">
+                    {generation.stage.replaceAll('_', ' ')} · {progress}%
+                  </p>
+                ) : null}
+                {generationFailed && generation.error ? (
+                  <p className="document-generate-status__error">{generation.error}</p>
+                ) : null}
+                {generationReady ? (
+                  <button
+                    type="button"
+                    className="document-detail__primary document-detail__primary--brand"
+                    onClick={() => void handleDownload()}
+                    disabled={isDownloading}
+                  >
+                    <FiDownload aria-hidden="true" size={16} />
+                    {isDownloading ? 'Downloading…' : 'Download DOCX'}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
             <div className="document-detail__action-row">
-              {hasConfirmedSpaces ? (
+              {hasConfirmedSpace && !isGenerating && !generationReady ? (
                 <button
                   type="button"
                   className="document-detail__primary document-detail__primary--brand"
-                  onClick={handleDocumentIt}
+                  onClick={() => void handleDocumentIt()}
+                  disabled={isStartingGenerate}
                 >
                   <FiZap aria-hidden="true" size={16} />
-                  Document it
+                  {generationFailed ? 'Try again' : isStartingGenerate ? 'Starting…' : 'Document it'}
                 </button>
               ) : null}
 
@@ -237,13 +465,14 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                 <button
                   ref={triggerRef}
                   type="button"
-                  className={`document-detail__primary${hasConfirmedSpaces ? ' document-detail__primary--ghost' : ''}${isPickerOpen ? ' is-open' : ''}`}
+                  className={`document-detail__primary${hasConfirmedSpace ? ' document-detail__primary--ghost' : ''}${isPickerOpen ? ' is-open' : ''}`}
                   aria-expanded={isPickerOpen}
                   aria-haspopup="dialog"
                   onClick={togglePicker}
+                  disabled={isGenerating}
                 >
                   <FiFolder aria-hidden="true" size={16} />
-                  {hasConfirmedSpaces ? 'Change spaces' : 'Select Space'}
+                  {hasConfirmedSpace ? 'Change space' : 'Select Space'}
                   <FiChevronDown
                     aria-hidden="true"
                     size={14}
@@ -255,7 +484,7 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                   <div
                     className="document-space-picker"
                     role="dialog"
-                    aria-label="Select spaces"
+                    aria-label="Select one space"
                     style={pickerStyle}
                   >
                     <label className="document-space-picker__search">
@@ -310,13 +539,13 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                       {userId && !isSpacesLoading && !isSpacesError && filteredSpaces.length > 0 ? (
                         <ul className="document-space-picker__list">
                           {filteredSpaces.map((space) => {
-                            const selected = selectedSpaceIds.includes(space.id);
+                            const selected = selectedSpaceId === space.id;
                             return (
                               <li key={space.id}>
                                 <button
                                   type="button"
                                   className={`document-space-picker__item${selected ? ' is-selected' : ''}`}
-                                  onClick={() => toggleSpace(space.id)}
+                                  onClick={() => setSelectedSpaceId(space.id)}
                                   aria-pressed={selected}
                                 >
                                   <span className="document-space-picker__check" aria-hidden="true">
@@ -334,12 +563,12 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                     </div>
 
                     <div className="document-space-picker__footer">
-                      <span>{selectedSpaceIds.length} selected</span>
+                      <span>{selectedSpaceId ? '1 selected' : 'Select one'}</span>
                       <button
                         type="button"
                         className="document-space-picker__confirm"
-                        disabled={selectedSpaceIds.length === 0}
-                        onClick={handleConfirmSpaces}
+                        disabled={!selectedSpaceId}
+                        onClick={handleConfirmSpace}
                       >
                         Done
                       </button>
@@ -348,10 +577,15 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                 ) : null}
               </div>
 
-              <button type="button" className="document-detail__secondary">
+              <button type="button" className="document-detail__secondary" disabled={isGenerating}>
                 Preview
               </button>
-              <button type="button" className="document-detail__icon-btn" aria-label="Share template">
+              <button
+                type="button"
+                className="document-detail__icon-btn"
+                aria-label="Share template"
+                disabled={isGenerating}
+              >
                 <FiShare2 aria-hidden="true" size={16} />
               </button>
             </div>
@@ -383,7 +617,7 @@ export const DocumentTemplateDetail = ({ template, Icon, onBack }: DocumentTempl
                   </li>
                 ))}
               </ul>
-              <p className="document-detail__footnote">Do not mix scopes.</p>
+              <p className="document-detail__footnote">Do not mix scopes. One space at a time.</p>
             </section>
           </article>
         </div>

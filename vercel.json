@@ -18,6 +18,10 @@
       "destination": "https://buddy-ai-api-710178903619.asia-south1.run.app/api/v1/mindmap/:path*"
     },
     {
+      "source": "/api/v1/documents/:path*",
+      "destination": "https://buddy-ai-api-710178903619.asia-south1.run.app/api/v1/documents/:path*"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://buddy-node-backend-scz7pyp3ha-el.a.run.app/api/:path*"
     },

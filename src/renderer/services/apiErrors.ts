@@ -76,10 +76,13 @@ export const getApiErrorMessage = (error: unknown, fallback: string) => {
     if (typeof data === 'string' && data.trim()) {
       return data;
     }
-    if (typeof data === 'object' && data && 'message' in data) {
-      const message = (data as { message?: unknown }).message;
-      if (typeof message === 'string' && message.trim()) {
-        return message.trim();
+    if (typeof data === 'object' && data) {
+      const record = data as { message?: unknown; detail?: unknown };
+      if (typeof record.message === 'string' && record.message.trim()) {
+        return record.message.trim();
+      }
+      if (typeof record.detail === 'string' && record.detail.trim()) {
+        return record.detail.trim();
       }
     }
   }

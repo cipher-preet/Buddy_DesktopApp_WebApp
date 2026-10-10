@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   FiCalendar,
   FiCheckSquare,
@@ -11,13 +11,24 @@ import {
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 
+import { useAppSelector } from '@/app/hooks';
+import { useToast } from '@/app/ToastProvider';
+import { formatRelativeDate } from '@/features/dashboard/homeMappers';
+import { getStoredAuthToken } from '@/features/auth/authStorage';
+import { getApiErrorMessage } from '@/services/apiErrors';
+import { useGetDocumentTemplatesQuery } from '@/services/documentTemplatesApi';
+import { useListDocumentsQuery, type SpaceDocument } from '@/services/documentsApi';
+import { DEFAULT_API_BASE_URL } from '@shared/constants/app';
+
+import { DocumentPreviewModal } from './DocumentPreviewModal';
 import { DocumentTemplateDetail } from './DocumentTemplateDetail';
-import { documentTemplates, type DocumentTemplate } from './documentTemplates';
+import type { DocumentTemplate } from './documentTemplates';
 
 import './document-it.css';
 
 type DocumentItPageProps = {
   embedded?: boolean;
+  spaceId?: string;
   spaceName?: string;
 };
 
@@ -32,6 +43,38 @@ export const templateIcons: Record<string, IconType> = {
   'daily-work-plan': FiTarget,
   'decision-log': FiClipboard,
   'action-item-tracker': FiCheckSquare,
+};
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+
+const downloadGeneratedDocx = async (documentId: string, fileName?: string | null) => {
+  const token = getStoredAuthToken();
+  const response = await fetch(`${apiBase}/documents/${encodeURIComponent(documentId)}/download`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    let detail = `Download failed (${response.status})`;
+    try {
+      const payload = (await response.json()) as { detail?: string; message?: string };
+      detail = payload.detail || payload.message || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName || 'document.docx';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 };
 
 const TemplateCard = ({
@@ -86,8 +129,72 @@ const TemplateCard = ({
   );
 };
 
-export const DocumentItPage = ({ embedded = false, spaceName }: DocumentItPageProps) => {
+const GeneratedDocumentCard = ({
+  document,
+  onOpen,
+}: {
+  document: SpaceDocument;
+  onOpen: (document: SpaceDocument) => void;
+}) => {
+  const Icon = templateIcons[document.templateCode || ''] ?? FiFileText;
+  const title = document.preview?.title || document.templateTitle || 'Document';
+  const excerpt = document.preview?.excerpt;
+  const updatedLabel = formatRelativeDate(document.updatedAt || document.createdAt);
+
+  return (
+    <article className="document-generated-card">
+      <button
+        type="button"
+        className="document-generated-card__preview"
+        aria-label={`Open ${title}`}
+        onClick={() => onOpen(document)}
+      >
+        <span className="document-generated-card__lead-icon" aria-hidden="true">
+          <Icon size={17} strokeWidth={1.6} />
+        </span>
+        <h3>{title}</h3>
+        {excerpt ? <p>{excerpt}</p> : null}
+        <span className="document-generated-card__badge">DOCX</span>
+      </button>
+      <div className="document-generated-card__meta">
+        <div>
+          <strong>{document.templateTitle || 'Document'}</strong>
+          <span>{updatedLabel || 'Just now'}</span>
+        </div>
+      </div>
+    </article>
+  );
+};
+
+export const DocumentItPage = ({ embedded = false, spaceId, spaceName }: DocumentItPageProps) => {
+  const { showToast } = useToast();
+  const userId = useAppSelector((state) => state.auth.user?.userId || '');
   const [selectedTemplate, setSelectedTemplate] = useState<DocumentTemplate | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<SpaceDocument | null>(null);
+  const showTemplates = !embedded;
+  const {
+    data: templates = [],
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+    error,
+  } = useGetDocumentTemplatesQuery(undefined, { skip: !showTemplates });
+
+  const {
+    data: generatedDocuments = [],
+    isLoading: isDocsLoading,
+    isError: isDocsError,
+    refetch: refetchDocs,
+  } = useListDocumentsQuery(
+    { userId, spaceId: spaceId || '', limit: 24 },
+    { skip: !userId || !spaceId },
+  );
+
+  const readyDocuments = useMemo(
+    () => generatedDocuments.filter((doc) => doc.status === 'READY'),
+    [generatedDocuments],
+  );
 
   if (selectedTemplate) {
     const Icon = templateIcons[selectedTemplate.id] ?? FiFileText;
@@ -99,11 +206,33 @@ export const DocumentItPage = ({ embedded = false, spaceName }: DocumentItPagePr
         <DocumentTemplateDetail
           template={selectedTemplate}
           Icon={Icon}
-          onBack={() => setSelectedTemplate(null)}
+          onBack={() => {
+            setSelectedTemplate(null);
+            if (userId && spaceId) {
+              void refetchDocs();
+            }
+          }}
+          initialSpaceId={spaceId}
+          initialSpaceName={spaceName}
         />
       </section>
     );
   }
+
+  const errorMessage = getApiErrorMessage(error, 'Unable to load templates');
+
+  const handleDownload = async (doc: SpaceDocument) => {
+    try {
+      await downloadGeneratedDocx(doc.documentId, doc.fileName);
+      showToast({ message: 'Download started.', type: 'success' });
+    } catch (downloadError) {
+      showToast({
+        message:
+          downloadError instanceof Error ? downloadError.message : 'Unable to download document',
+        type: 'error',
+      });
+    }
+  };
 
   return (
     <section
@@ -116,21 +245,100 @@ export const DocumentItPage = ({ embedded = false, spaceName }: DocumentItPagePr
         </header>
       ) : null}
 
-      <div className="document-templates">
-        <div className="document-templates__header">
-          <h2>
-            <FiFileText aria-hidden="true" size={15} strokeWidth={1.7} />
-            Popular templates
-          </h2>
-          <button type="button">Browse all</button>
-        </div>
+      {spaceId ? (
+        <div className="document-generated">
+          {isDocsLoading ? (
+            <div className="document-templates__state" aria-busy="true">
+              <span className="home-spinner" />
+              <p>Loading documents…</p>
+            </div>
+          ) : null}
 
-        <div className="document-templates__grid">
-          {documentTemplates.map((template) => (
-            <TemplateCard key={template.id} template={template} onSelect={setSelectedTemplate} />
-          ))}
+          {isDocsError && !isDocsLoading ? (
+            <div className="document-templates__state" role="alert">
+              <p>Unable to load generated documents</p>
+              <button type="button" className="home-retry-button" onClick={() => void refetchDocs()}>
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          {!isDocsLoading && !isDocsError && readyDocuments.length === 0 ? (
+            <div className="document-templates__state document-templates__state--compact">
+              <p>No generated documents yet</p>
+              <span>Open Document it, pick a template, then generate for this space.</span>
+            </div>
+          ) : null}
+
+          {!isDocsLoading && !isDocsError && readyDocuments.length > 0 ? (
+            <div className="document-generated__grid">
+              {readyDocuments.map((doc) => (
+                <GeneratedDocumentCard
+                  key={doc.documentId}
+                  document={doc}
+                  onOpen={setPreviewDocument}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
-      </div>
+      ) : null}
+
+      {previewDocument ? (
+        <DocumentPreviewModal
+          documentId={previewDocument.documentId}
+          fallback={previewDocument}
+          onClose={() => setPreviewDocument(null)}
+          onDownload={handleDownload}
+        />
+      ) : null}
+
+      {showTemplates ? (
+        <div className="document-templates">
+          <div className="document-templates__header">
+            <h2>
+              <FiFileText aria-hidden="true" size={15} strokeWidth={1.7} />
+              Popular templates
+            </h2>
+            <button type="button">Browse all</button>
+          </div>
+
+          {isLoading ? (
+            <div className="document-templates__state" aria-busy="true">
+              <span className="home-spinner" />
+              <p>Loading templates…</p>
+            </div>
+          ) : null}
+
+          {isError && !isLoading ? (
+            <div className="document-templates__state" role="alert">
+              <p>{errorMessage}</p>
+              <button
+                type="button"
+                className="home-retry-button"
+                disabled={isFetching}
+                onClick={() => void refetch()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          {!isLoading && !isError && templates.length === 0 ? (
+            <div className="document-templates__state">
+              <p>No templates available yet</p>
+            </div>
+          ) : null}
+
+          {!isLoading && !isError && templates.length > 0 ? (
+            <div className="document-templates__grid">
+              {templates.map((template) => (
+                <TemplateCard key={template.id} template={template} onSelect={setSelectedTemplate} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 };
