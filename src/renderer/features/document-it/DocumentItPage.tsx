@@ -157,10 +157,12 @@ const GeneratedDocumentCard = ({
         <span className="document-generated-card__badge">DOCX</span>
       </button>
       <div className="document-generated-card__meta">
-        <div>
-          <strong>{document.templateTitle || 'Document'}</strong>
-          <span>{updatedLabel || 'Just now'}</span>
-        </div>
+        <strong className="document-generated-card__meta-title">
+          {document.templateTitle || 'Document'}
+        </strong>
+        <span className="document-generated-card__meta-date">
+          {updatedLabel || 'Just now'}
+        </span>
       </div>
     </article>
   );
