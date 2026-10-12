@@ -219,6 +219,7 @@ export const api = createApi({
     'MindmapList',
     'DocumentTemplates',
     'SpaceDocuments',
+    'Goals',
   ],
   endpoints: (builder) => ({
     getHealth: builder.query<HealthResponse, void>({

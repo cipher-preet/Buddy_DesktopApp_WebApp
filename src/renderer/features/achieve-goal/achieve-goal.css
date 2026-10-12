@@ -281,12 +281,8 @@
 .achieve-goal-goal-card {
   position: relative;
   display: grid;
-  justify-items: center;
-  align-content: start;
-  gap: 10px;
   min-width: 0;
   min-height: 188px;
-  padding: 28px 22px 24px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   color: inherit;
@@ -302,10 +298,88 @@
   box-shadow: 0 8px 22px rgb(19 85 255 / 0.08);
 }
 
+.achieve-goal-goal-card__body {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 188px;
+  padding: 28px 22px 24px;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  background: transparent;
+  text-align: center;
+  cursor: pointer;
+}
+
+.achieve-goal-goal-card__menu {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+}
+
+.achieve-goal-goal-card__dots {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.achieve-goal-goal-card__dots:hover,
+.achieve-goal-goal-card__dots[aria-expanded='true'] {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+
+.achieve-goal-goal-card__popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 4;
+  min-width: 148px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgb(16 24 40 / 0.12);
+}
+
+.achieve-goal-goal-card__delete {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: #b42318;
+  background: transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.achieve-goal-goal-card__delete:hover:not(:disabled) {
+  background: #fef3f2;
+}
+
+.achieve-goal-goal-card__delete:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .achieve-goal-goal-card__badge {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 12px;
   padding: 2px 8px;
   border: 1px solid #d6e2ff;
   border-radius: var(--radius-pill);
@@ -420,8 +494,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .achieve-goal-goal-card {
+  .achieve-goal-goal-card,
+  .achieve-goal-goal-card__body {
     min-height: 0;
+  }
+
+  .achieve-goal-goal-card__body {
     padding: 24px 18px 20px;
   }
 }
@@ -832,6 +910,158 @@
 
 .goal-steps-modal__next:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.achieve-goal-form-error,
+.goal-steps-note--error {
+  margin: 0;
+  color: var(--color-danger, #b42318);
+  font-size: 0.88rem;
+}
+
+.achieve-goal-form-note,
+.goal-steps-note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+}
+
+.goal-steps-wait {
+  display: grid;
+  gap: 16px;
+}
+
+.goal-steps-skeleton {
+  display: grid;
+  gap: 10px;
+}
+
+.goal-steps-skeleton span {
+  display: block;
+  height: 14px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--color-surface-muted), #fff, var(--color-surface-muted));
+  background-size: 200% 100%;
+  animation: goal-steps-shimmer 1.2s ease-in-out infinite;
+}
+
+.goal-steps-skeleton span:nth-child(2) {
+  width: 86%;
+}
+
+.goal-steps-skeleton span:nth-child(3) {
+  width: 64%;
+}
+
+.goal-steps-modal__other {
+  margin-top: 12px;
+}
+
+.goal-steps-findings ul,
+.goal-steps-plan {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-steps-findings li,
+.goal-steps-plan li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.goal-steps-plan small,
+.goal-steps-plan span,
+.goal-steps-findings li {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+}
+
+.goal-steps-expert {
+  display: grid;
+  gap: 16px;
+}
+
+.goal-steps-expert__brief p {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.goal-steps-expert__mission {
+  color: var(--color-text) !important;
+  font-weight: 600;
+}
+
+.goal-steps-expert__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.goal-steps-expert__metrics > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.goal-steps-expert__metrics strong {
+  font-size: 0.95rem;
+}
+
+.goal-steps-expert__metrics span,
+.goal-steps-expert__days h3,
+.goal-steps-expert__strategies h3 {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.goal-steps-expert__days h3,
+.goal-steps-expert__strategies h3 {
+  margin: 0 0 8px;
+}
+
+.goal-steps-expert__strategies ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal-steps-expert__strategies li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.goal-steps-expert__strategies span {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+@keyframes goal-steps-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
 }
 
 .goal-steps-modal__next:disabled {

@@ -88,9 +88,11 @@ const writeRouteToHash = (route: AppRoute) => {
     return;
   }
   const next = `#/${route}`;
-  if (window.location.hash !== next) {
-    window.location.hash = next;
+  const current = window.location.hash;
+  if (current === next || current.startsWith(`${next}?`)) {
+    return;
   }
+  window.location.hash = next;
 };
 
 type HomeSectionFocus = 'notes' | 'tasks' | 'spaces';
