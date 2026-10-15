@@ -24,12 +24,20 @@ export type NotificationItem = {
   read: boolean;
 };
 
-export type NotificationFeed = {
+export type NotificationPage = {
   items: NotificationItem[];
   unreadCount: number;
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type NotificationFilter = 'all' | 'unread';
+
+type CursorPageParam = string | null;
+
+const PAGE_SIZE = 15;
+const FEED_TAG = { type: 'Notifications' as const, id: 'FEED' };
+const UNREAD_TAG = { type: 'Notifications' as const, id: 'UNREAD_COUNT' };
 
 const unwrap = <T,>(response: Envelope<T>, fallbackMessage: string): T => {
   if (!response?.success || response.data === undefined) {
@@ -38,71 +46,129 @@ const unwrap = <T,>(response: Envelope<T>, fallbackMessage: string): T => {
   return response.data;
 };
 
-const FEED_TAG = { type: 'Notifications' as const, id: 'FEED' };
-const FILTERS: NotificationFilter[] = ['all', 'unread'];
-
 export const notificationsApi = api.injectEndpoints({
   endpoints: (builder) => ({
-    getNotifications: builder.query<NotificationFeed, NotificationFilter>({
-      query: (filter) => ({
+    getUnreadNotificationCount: builder.query<{ unreadCount: number }, void>({
+      query: () => ({ url: 'notifications/unread-count' }),
+      transformResponse: (response: Envelope<{ unreadCount: number }>) =>
+        unwrap(response, 'Unable to load notification count'),
+      // Align with the 30s badge poll so focus/remount does not double-hit.
+      keepUnusedDataFor: 30,
+      providesTags: [UNREAD_TAG],
+    }),
+
+    getNotifications: builder.infiniteQuery<NotificationPage, NotificationFilter, CursorPageParam>({
+      infiniteQueryOptions: {
+        initialPageParam: null,
+        getNextPageParam: (lastPage) =>
+          lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined,
+      },
+      query: ({ queryArg: filter, pageParam }) => ({
         url: 'notifications',
-        params: filter === 'unread' ? { filter: 'unread' } : undefined,
+        params: {
+          limit: PAGE_SIZE,
+          ...(filter === 'unread' ? { filter: 'unread' } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
       }),
-      transformResponse: (response: Envelope<NotificationFeed>) =>
-        unwrap(response, 'Unable to load notifications'),
+      transformResponse: (response: Envelope<Partial<NotificationPage>>) => {
+        const page = unwrap(response, 'Unable to load notifications');
+        return {
+          items: page.items ?? [],
+          unreadCount: page.unreadCount ?? 0,
+          nextCursor: page.nextCursor ?? null,
+          hasMore: Boolean(page.hasMore && page.nextCursor),
+        };
+      },
       providesTags: [FEED_TAG],
     }),
+
     markNotificationsRead: builder.mutation<void, string[]>({
       query: (ids) => ({ url: 'notifications/read', method: 'POST', body: { ids } }),
-      async onQueryStarted(ids, { dispatch, queryFulfilled }) {
+      async onQueryStarted(ids, { dispatch, queryFulfilled, getState }) {
         const marked = new Set(ids);
-        const patches = FILTERS.map((filter) =>
+        const cachedArgs = notificationsApi.util.selectCachedArgsForQuery(getState(), 'getNotifications');
+        let groupsMarked = 0;
+
+        const feedPatches = cachedArgs.map((filter) =>
           dispatch(
             notificationsApi.util.updateQueryData('getNotifications', filter, (draft) => {
               let newlyRead = 0;
-              for (const item of draft.items) {
-                if (!item.read && item.memberIds.some((id) => marked.has(id))) {
-                  item.read = true;
-                  newlyRead += 1;
+              for (const page of draft.pages) {
+                for (const item of page.items) {
+                  if (!item.read && item.memberIds.some((id) => marked.has(id))) {
+                    item.read = true;
+                    newlyRead += 1;
+                  }
                 }
               }
-              draft.unreadCount = Math.max(0, draft.unreadCount - newlyRead);
+              if (draft.pages[0] && newlyRead > 0) {
+                draft.pages[0].unreadCount = Math.max(0, draft.pages[0].unreadCount - newlyRead);
+              }
+              // Prefer the inbox cache count; otherwise keep the first positive match.
+              if (newlyRead > 0 && (filter === 'all' || groupsMarked === 0)) {
+                groupsMarked = newlyRead;
+              }
             }),
           ),
         );
+
+        const unreadPatch = dispatch(
+          notificationsApi.util.updateQueryData('getUnreadNotificationCount', undefined, (draft) => {
+            draft.unreadCount = Math.max(0, draft.unreadCount - (groupsMarked || 1));
+          }),
+        );
+
         try {
           await queryFulfilled;
         } catch {
-          patches.forEach((patch) => patch.undo());
+          feedPatches.forEach((patch) => patch.undo());
+          unreadPatch.undo();
         }
       },
+      invalidatesTags: [UNREAD_TAG],
     }),
+
     markAllNotificationsRead: builder.mutation<void, void>({
       query: () => ({ url: 'notifications/read-all', method: 'POST' }),
-      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
-        const patches = FILTERS.map((filter) =>
+      async onQueryStarted(_arg, { dispatch, queryFulfilled, getState }) {
+        const cachedArgs = notificationsApi.util.selectCachedArgsForQuery(getState(), 'getNotifications');
+        const feedPatches = cachedArgs.map((filter) =>
           dispatch(
             notificationsApi.util.updateQueryData('getNotifications', filter, (draft) => {
-              draft.items.forEach((item) => {
-                item.read = true;
-              });
-              draft.unreadCount = 0;
+              for (const page of draft.pages) {
+                page.items.forEach((item) => {
+                  item.read = true;
+                });
+                page.unreadCount = 0;
+              }
             }),
           ),
         );
+        const unreadPatch = dispatch(
+          notificationsApi.util.updateQueryData('getUnreadNotificationCount', undefined, (draft) => {
+            draft.unreadCount = 0;
+          }),
+        );
+
         try {
           await queryFulfilled;
         } catch {
-          patches.forEach((patch) => patch.undo());
+          feedPatches.forEach((patch) => patch.undo());
+          unreadPatch.undo();
         }
       },
+      invalidatesTags: [UNREAD_TAG, FEED_TAG],
     }),
   }),
   overrideExisting: false,
 });
 
+export const NOTIFICATIONS_PAGE_SIZE = PAGE_SIZE;
+
 export const {
-  useGetNotificationsQuery,
+  useGetUnreadNotificationCountQuery,
+  useGetNotificationsInfiniteQuery,
   useMarkNotificationsReadMutation,
   useMarkAllNotificationsReadMutation,
 } = notificationsApi;

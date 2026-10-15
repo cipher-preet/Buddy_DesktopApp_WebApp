@@ -14,9 +14,13 @@ import type {
 
 export type CursorPageParam = string | null;
 
+export type SpaceCountsMode = 'all' | 'notes' | 'tasks' | 'none';
+
 export type UserSpacesQueryArg = {
   userId: string;
   limit?: number;
+  /** Omit or `all` when badges need task/note counts; use `none` for pickers. */
+  counts?: SpaceCountsMode;
 };
 
 export type SpaceItemsQueryArg = {
@@ -81,6 +85,7 @@ export const homeApi = api.injectEndpoints({
         params: {
           userId: queryArg.userId,
           limit: queryArg.limit ?? 10,
+          counts: queryArg.counts ?? 'all',
           ...(pageParam ? { cursor: pageParam } : {}),
         },
       }),
@@ -92,6 +97,7 @@ export const homeApi = api.injectEndpoints({
           nextCursor: page.nextCursor,
         };
       },
+      keepUnusedDataFor: 120,
       providesTags: (result) =>
         result
           ? [
@@ -216,8 +222,6 @@ export const homeApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, arg) => [
         { type: 'SpaceTasks', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
-        'Profile',
-        'Notifications',
       ],
     }),
     createStagedNote: builder.mutation<
@@ -234,8 +238,6 @@ export const homeApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, arg) => [
         { type: 'SpaceNotes', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
-        'Profile',
-        'Notifications',
       ],
     }),
     updateSpace: builder.mutation<
@@ -273,11 +275,7 @@ export const homeApi = api.injectEndpoints({
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to update task'),
-      invalidatesTags: (_result, _error, arg) => [
-        { type: 'SpaceTasks', id: arg.spaceId },
-        { type: 'Spaces', id: 'LIST' },
-        'Profile',
-      ],
+      invalidatesTags: (_result, _error, arg) => [{ type: 'SpaceTasks', id: arg.spaceId }],
     }),
     updateStagedNote: builder.mutation<
       { message?: string },
@@ -296,11 +294,7 @@ export const homeApi = api.injectEndpoints({
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to update note'),
-      invalidatesTags: (_result, _error, arg) => [
-        { type: 'SpaceNotes', id: arg.spaceId },
-        { type: 'Spaces', id: 'LIST' },
-        'Profile',
-      ],
+      invalidatesTags: (_result, _error, arg) => [{ type: 'SpaceNotes', id: arg.spaceId }],
     }),
     deleteSpace: builder.mutation<{ message?: string }, { spaceId: string }>({
       query: (body) => ({
@@ -315,7 +309,13 @@ export const homeApi = api.injectEndpoints({
         }
         return { message: 'Space deleted successfully.' };
       },
-      invalidatesTags: [{ type: 'Spaces', id: 'LIST' }, 'Profile', 'SpaceTasks', 'SpaceNotes', 'Notifications'],
+      invalidatesTags: (_result, _error, arg) => [
+        { type: 'Spaces', id: 'LIST' },
+        { type: 'Spaces', id: arg.spaceId },
+        { type: 'SpaceTasks', id: arg.spaceId },
+        { type: 'SpaceNotes', id: arg.spaceId },
+        'Profile',
+      ],
     }),
     deleteStagedTask: builder.mutation<
       { message?: string },
@@ -336,8 +336,6 @@ export const homeApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, arg) => [
         { type: 'SpaceTasks', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
-        'Profile',
-        'Notifications',
       ],
     }),
     deleteStagedNote: builder.mutation<
@@ -359,8 +357,6 @@ export const homeApi = api.injectEndpoints({
       invalidatesTags: (_result, _error, arg) => [
         { type: 'SpaceNotes', id: arg.spaceId },
         { type: 'Spaces', id: 'LIST' },
-        'Profile',
-        'Notifications',
       ],
     }),
     setStagedTaskStatus: builder.mutation<
@@ -374,11 +370,7 @@ export const homeApi = api.injectEndpoints({
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to update task status'),
-      invalidatesTags: (_result, _error, arg) => [
-        { type: 'SpaceTasks', id: arg.spaceId },
-        { type: 'Spaces', id: 'LIST' },
-        'Profile',
-      ],
+      invalidatesTags: (_result, _error, arg) => [{ type: 'SpaceTasks', id: arg.spaceId }],
     }),
     getProfileSummary: builder.query<
       ProfileSummary,

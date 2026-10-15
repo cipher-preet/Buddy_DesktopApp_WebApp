@@ -1,14 +1,14 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { FiCalendar, FiFileText } from 'react-icons/fi';
 
-import { useGetNoteByIdQuery } from '@/services/homeApi';
-
+import { groupItemsByDate } from './homeMappers';
 import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote } from './homeTypes';
 
 export type NoteLayout = 'grid' | 'list';
 
 const ACCENTS = ['indigo', 'violet', 'teal', 'amber', 'rose', 'sky'] as const;
+const BULLET_LINE = /^\s*(?:[-*•▪◦]|\d+[.)])\s+(.*)$/;
 
 const accentFor = (id: string) => {
   let hash = 0;
@@ -18,68 +18,68 @@ const accentFor = (id: string) => {
   return ACCENTS[hash % ACCENTS.length];
 };
 
-type NoteExcerptProps = {
-  note: WorkspaceNote;
-  spaceId: string;
-  layout: NoteLayout;
-  isExpanded: boolean;
-  onToggle: () => void;
+/** Turns plain "-" / "*" markdown bullets into styled dots for note cards. */
+const renderNoteExcerpt = (excerpt: string): ReactNode => {
+  const lines = excerpt.replace(/\r\n/g, '\n').split('\n');
+  const blocks: ReactNode[] = [];
+  let bulletBuffer: string[] = [];
+  let key = 0;
+
+  const flushBullets = () => {
+    if (bulletBuffer.length === 0) {
+      return;
+    }
+
+    blocks.push(
+      <ul className="note-card__bullets" key={`bullets-${key}`}>
+        {bulletBuffer.map((item, index) => (
+          <li key={`${key}-${index}`}>{item}</li>
+        ))}
+      </ul>,
+    );
+    key += 1;
+    bulletBuffer = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushBullets();
+      return;
+    }
+
+    const bulletMatch = trimmed.match(BULLET_LINE);
+    if (bulletMatch) {
+      bulletBuffer.push(bulletMatch[1].trim());
+      return;
+    }
+
+    flushBullets();
+    blocks.push(
+      <p className="note-card__paragraph" key={`p-${key}`}>
+        {trimmed}
+      </p>,
+    );
+    key += 1;
+  });
+
+  flushBullets();
+  return blocks.length > 0 ? blocks : excerpt;
 };
 
-// Overflow is measured rather than guessed from length, since the clamp depends on card width, layout and line breaks.
-const NoteExcerpt = ({ note, spaceId, layout, isExpanded, onToggle }: NoteExcerptProps) => {
-  const textRef = useRef<HTMLParagraphElement>(null);
-  const [isClamped, setIsClamped] = useState(false);
-  const {
-    data: fullNote,
-    isFetching,
-    isError,
-    refetch,
-  } = useGetNoteByIdQuery({ noteId: note.id, spaceId }, { skip: !isExpanded || !note.isTruncated });
+type NoteCardBodyProps = {
+  note: WorkspaceNote;
+};
 
-  const fullBody = fullNote?.body.trim();
-  const isLoadingFull = isExpanded && note.isTruncated && !fullBody && isFetching;
-  const failedToLoad = isExpanded && note.isTruncated && !fullBody && isError && !isFetching;
-  const text = isExpanded && fullBody ? fullBody : note.isTruncated ? `${note.excerpt}…` : note.excerpt;
+/** Use list preview only — full body loads on edit, not per card. */
+const NoteCardBody = ({ note }: NoteCardBodyProps) => {
+  const body = note.excerpt.trim();
 
-  useLayoutEffect(() => {
-    const element = textRef.current;
-    if (!element || isExpanded) {
-      return undefined;
-    }
-    const measure = () => setIsClamped(element.scrollHeight > element.clientHeight + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [isExpanded, layout, text]);
+  if (!body) {
+    return <p className="note-card__excerpt is-empty">No content yet.</p>;
+  }
 
-  return (
-    <>
-      <p ref={textRef} className={`note-card__excerpt${isExpanded ? ' is-expanded' : ''}`}>
-        {text}
-      </p>
-      {failedToLoad ? (
-        <p className="note-card__load-error" role="alert">
-          Couldn&apos;t load the full note.{' '}
-          <button type="button" onClick={() => void refetch()}>
-            Try again
-          </button>
-        </p>
-      ) : null}
-      {isClamped || note.isTruncated || isExpanded ? (
-        <button
-          className="note-card__more"
-          type="button"
-          aria-expanded={isExpanded}
-          disabled={isLoadingFull}
-          onClick={onToggle}
-        >
-          {isLoadingFull ? 'Loading…' : isExpanded ? 'Show less' : 'Show more'}
-        </button>
-      ) : null}
-    </>
-  );
+  return <div className="note-card__excerpt is-full">{renderNoteExcerpt(body)}</div>;
 };
 
 type NoteBoardProps = {
@@ -95,7 +95,7 @@ type NoteBoardProps = {
 
 export const NoteBoard = ({
   notes,
-  spaceId,
+  spaceId: _spaceId,
   layout,
   openItemMenuId,
   searchHitId,
@@ -103,73 +103,67 @@ export const NoteBoard = ({
   onEdit,
   onDelete,
 }: NoteBoardProps) => {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
-
-  const toggleExpanded = (noteId: string) =>
-    setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(noteId)) {
-        next.delete(noteId);
-      } else {
-        next.add(noteId);
-      }
-      return next;
-    });
+  const groups = useMemo(() => groupItemsByDate(notes), [notes]);
 
   return (
-    <div className="note-board" data-layout={layout}>
-      {notes.map((note) => {
-        const menuId = `note:${note.id}`;
-        const isMenuOpen = openItemMenuId === menuId;
-        return (
-          <article
-            className={`note-card${isMenuOpen ? ' is-menu-open' : ''}${searchHitId === note.id ? ' is-search-hit' : ''}`}
-            data-accent={accentFor(note.id)}
-            data-search-id={note.id}
-            key={note.id}
-          >
-            <header className="note-card__header">
-              <span className="note-card__icon">
-                <FiFileText aria-hidden="true" size={15} />
-              </span>
-              <h3>{note.title}</h3>
-              <div className="note-card__actions">
-                <ItemActionsMenu
-                  itemLabel={note.title}
-                  isOpen={isMenuOpen}
-                  onOpen={() => onMenuChange(menuId)}
-                  onClose={() => onMenuChange(null)}
-                  onEdit={() => {
-                    onMenuChange(null);
-                    onEdit(note);
-                  }}
-                  onDelete={() => {
-                    onMenuChange(null);
-                    onDelete(note);
-                  }}
-                />
-              </div>
-            </header>
-            {note.excerpt ? (
-              <NoteExcerpt
-                note={note}
-                spaceId={spaceId}
-                layout={layout}
-                isExpanded={expandedIds.has(note.id)}
-                onToggle={() => toggleExpanded(note.id)}
-              />
-            ) : (
-              <p className="note-card__excerpt is-empty">No content yet.</p>
-            )}
-            <footer className="note-card__footer">
-              <span>
-                <FiCalendar aria-hidden="true" size={12} />
-                {note.dateLabel}
-              </span>
-            </footer>
-          </article>
-        );
-      })}
+    <div className="board-date-stack">
+      {groups.map((group) => (
+        <section className="board-date-group" key={group.key} aria-label={group.label}>
+          <div className="board-date-separator" role="separator" aria-label={group.label}>
+            <span />
+            <strong>{group.label}</strong>
+            <span />
+          </div>
+
+          <div className="note-board" data-layout={layout}>
+            {group.items.map((note) => {
+              const menuId = `note:${note.id}`;
+              const isMenuOpen = openItemMenuId === menuId;
+
+              return (
+                <article
+                  className={`note-card${isMenuOpen ? ' is-menu-open' : ''}${
+                    searchHitId === note.id ? ' is-search-hit' : ''
+                  }`}
+                  data-accent={accentFor(note.id)}
+                  data-search-id={note.id}
+                  key={note.id}
+                >
+                  <header className="note-card__header">
+                    <span className="note-card__icon">
+                      <FiFileText aria-hidden="true" size={15} />
+                    </span>
+                    <h3>{note.title}</h3>
+                    <div className="note-card__actions">
+                      <ItemActionsMenu
+                        itemLabel={note.title}
+                        isOpen={isMenuOpen}
+                        onOpen={() => onMenuChange(menuId)}
+                        onClose={() => onMenuChange(null)}
+                        onEdit={() => {
+                          onMenuChange(null);
+                          onEdit(note);
+                        }}
+                        onDelete={() => {
+                          onMenuChange(null);
+                          onDelete(note);
+                        }}
+                      />
+                    </div>
+                  </header>
+                  <NoteCardBody note={note} />
+                  <footer className="note-card__footer">
+                    <span>
+                      <FiCalendar aria-hidden="true" size={12} />
+                      {note.dateLabel}
+                    </span>
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 };

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiAlertCircle,
-  FiArrowRight,
+  FiCamera,
   FiCheckSquare,
   FiChevronDown,
+  FiChevronRight,
   FiCreditCard,
   FiEdit2,
   FiFileText,
@@ -29,6 +30,7 @@ import {
   useLogoutMutation,
   useRaiseSupportTicketMutation,
   useSubmitFeedbackMutation,
+  useUpdateAvatarMutation,
   useUpdateProfileMutation,
 } from '@/services/api';
 import { useGetProfileSummaryQuery } from '@/services/homeApi';
@@ -47,6 +49,10 @@ type SettingsPageProps = {
 type AccountAction = 'plan' | 'feedback' | 'support';
 type FeedbackStep = 'details' | 'success';
 type SupportStep = 'hub' | 'ticket' | 'success';
+
+const AVATAR_MAX_BYTES = 3 * 1024 * 1024;
+const AVATAR_ACCEPT = 'image/jpeg,image/png,image/webp';
+const AVATAR_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 type OptionItem = {
   id: string;
@@ -208,10 +214,13 @@ export const SettingsPage = ({
   } = useGetPlanStatusQuery({ userId }, { skip: !userId });
 
   const [updateProfile, { isLoading: isSavingProfile }] = useUpdateProfileMutation();
+  const [updateAvatar, { isLoading: isUploadingAvatar }] = useUpdateAvatarMutation();
   const [submitFeedback, { isLoading: isSubmittingFeedback }] = useSubmitFeedbackMutation();
   const [raiseSupportTicket, { isLoading: isRaisingTicket }] = useRaiseSupportTicketMutation();
   const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
   const [deleteAccount, { isLoading: isDeletingAccount }] = useDeleteAccountMutation();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
 
   const selectedFeedbackTopic = useMemo(
     () => feedbackTopics.find((topic) => topic.id === feedbackTopicId) ?? feedbackTopics[0],
@@ -233,7 +242,18 @@ export const SettingsPage = ({
   const canSubmitFeedback = feedbackMessage.trim().length >= 8 && !isSubmittingFeedback;
   const canSubmitTicket =
     supportSubject.trim().length >= 4 && supportMessage.trim().length >= 12 && !isRaisingTicket;
-  const canSaveProfile = draftProfile.name.trim().length >= 2 && !isSavingProfile;
+  const canSaveProfile =
+    draftProfile.name.trim().length >= 2 && !isSavingProfile && !isUploadingAvatar;
+  const avatarUrl = avatarPreviewUrl || authUser?.avatar || null;
+  const avatarInitial = (profile.name || 'K').charAt(0).toUpperCase();
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(avatarPreviewUrl);
+      }
+    };
+  }, [avatarPreviewUrl]);
 
   useEffect(() => {
     if (focusSection !== 'plans') {
@@ -292,7 +312,76 @@ export const SettingsPage = ({
   const openEditProfile = () => {
     setProfileError('');
     setDraftProfile(profile);
+    if (avatarPreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(avatarPreviewUrl);
+    }
+    setAvatarPreviewUrl(null);
     setIsEditOpen(true);
+  };
+
+  const closeEditProfile = () => {
+    if (isSavingProfile || isUploadingAvatar) {
+      return;
+    }
+    if (avatarPreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(avatarPreviewUrl);
+    }
+    setAvatarPreviewUrl(null);
+    setProfileError('');
+    setIsEditOpen(false);
+  };
+
+  const handleAvatarSelected = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    if (!AVATAR_MIME_TYPES.has(file.type)) {
+      setProfileError('Use a JPG, PNG, or WEBP image.');
+      return;
+    }
+
+    if (file.size > AVATAR_MAX_BYTES) {
+      setProfileError('Profile photo must be 3 MB or smaller.');
+      return;
+    }
+
+    setProfileError('');
+    const localPreview = URL.createObjectURL(file);
+    if (avatarPreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(avatarPreviewUrl);
+    }
+    setAvatarPreviewUrl(localPreview);
+
+    const body = new FormData();
+    body.append('avatar', file);
+
+    try {
+      const updated = await updateAvatar(body).unwrap();
+      dispatch(
+        updateAuthUser({
+          avatar: updated.avatar ?? authUser?.avatar,
+          name: updated.name ?? authUser?.name,
+          email: updated.email ?? authUser?.email,
+          phone: updated.phone ?? authUser?.phone,
+        }),
+      );
+      if (localPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(localPreview);
+      }
+      setAvatarPreviewUrl(null);
+      showToast({ message: 'Profile photo updated', type: 'success' });
+    } catch (error) {
+      if (localPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(localPreview);
+      }
+      setAvatarPreviewUrl(null);
+      setProfileError(getApiErrorMessage(error, 'Unable to upload profile photo.'));
+    } finally {
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
   };
 
   const saveProfile = async () => {
@@ -323,6 +412,10 @@ export const SettingsPage = ({
           avatar: updated.avatar ?? authUser?.avatar,
         }),
       );
+      if (avatarPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(avatarPreviewUrl);
+      }
+      setAvatarPreviewUrl(null);
       setIsEditOpen(false);
       showToast({ message: 'Profile updated', type: 'success' });
     } catch (error) {
@@ -461,7 +554,11 @@ export const SettingsPage = ({
         <div className="settings-layout">
           <aside className="profile-summary-card">
             <button className="profile-avatar" type="button" onClick={openEditProfile}>
-              <span>{profile.name.charAt(0).toUpperCase()}</span>
+              {authUser?.avatar ? (
+                <img src={authUser.avatar} alt="" className="profile-avatar__image" />
+              ) : (
+                <span>{avatarInitial}</span>
+              )}
               <span className="profile-avatar__edit">
                 <FiEdit2 aria-hidden="true" size={13} />
               </span>
@@ -541,7 +638,9 @@ export const SettingsPage = ({
                         <strong>{item.title}</strong>
                         <small>{item.subtitle}</small>
                       </span>
-                      <span className="settings-row__chevron">›</span>
+                      <span className="settings-row__chevron" aria-hidden="true">
+                        <FiChevronRight size={18} />
+                      </span>
                     </button>
                   );
                 })}
@@ -570,7 +669,9 @@ export const SettingsPage = ({
                       </span>
                       <span className="settings-row__trailing">
                         {item.value ? <strong>{item.value}</strong> : null}
-                        <span>›</span>
+                        <span className="settings-row__chevron" aria-hidden="true">
+                          <FiChevronRight size={18} />
+                        </span>
                       </span>
                     </button>
                   );
@@ -589,7 +690,9 @@ export const SettingsPage = ({
                     <strong>Logout</strong>
                     <small>Sign out of your account</small>
                   </span>
-                  <span className="settings-row__chevron">›</span>
+                  <span className="settings-row__chevron" aria-hidden="true">
+                    <FiChevronRight size={18} />
+                  </span>
                 </button>
                 <button className="settings-row settings-row--danger" type="button" onClick={() => setIsDeleteOpen(true)}>
                   <span className="settings-row__icon">
@@ -599,7 +702,9 @@ export const SettingsPage = ({
                     <strong>Delete Account</strong>
                     <small>Permanently erase your account and data</small>
                   </span>
-                  <span className="settings-row__chevron">›</span>
+                  <span className="settings-row__chevron" aria-hidden="true">
+                    <FiChevronRight size={18} />
+                  </span>
                 </button>
               </div>
             </section>
@@ -623,16 +728,57 @@ export const SettingsPage = ({
                 <h2>Edit Profile</h2>
                 <p>Keep your KukuNotes profile up to date.</p>
               </div>
-              <button type="button" onClick={() => setIsEditOpen(false)} aria-label="Close" disabled={isSavingProfile}>
+              <button
+                type="button"
+                onClick={closeEditProfile}
+                aria-label="Close"
+                disabled={isSavingProfile || isUploadingAvatar}
+              >
                 ×
               </button>
             </header>
+
+            <div className="settings-profile-photo">
+              <div className="settings-profile-photo__preview" aria-hidden={Boolean(avatarUrl)}>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="settings-profile-photo__image" />
+                ) : (
+                  <span>{avatarInitial}</span>
+                )}
+                {isUploadingAvatar ? (
+                  <span className="settings-profile-photo__busy" aria-live="polite">
+                    <span className="home-spinner" />
+                  </span>
+                ) : null}
+              </div>
+              <div className="settings-profile-photo__meta">
+                <strong>Profile photo</strong>
+                <p>JPG, PNG, or WEBP up to 3 MB.</p>
+                <button
+                  type="button"
+                  className="settings-secondary-button"
+                  disabled={isSavingProfile || isUploadingAvatar}
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  <FiCamera aria-hidden="true" size={14} />
+                  {isUploadingAvatar ? 'Uploading…' : avatarUrl ? 'Change photo' : 'Add photo'}
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept={AVATAR_ACCEPT}
+                  hidden
+                  onChange={(event) => void handleAvatarSelected(event.target.files?.[0])}
+                />
+              </div>
+            </div>
+
             <label>
               Name
               <input
                 value={draftProfile.name}
                 onChange={(event) => setDraftProfile({ ...draftProfile, name: event.target.value })}
-                disabled={isSavingProfile}
+                disabled={isSavingProfile || isUploadingAvatar}
               />
             </label>
             <label>
@@ -640,7 +786,7 @@ export const SettingsPage = ({
               <input
                 value={draftProfile.email}
                 onChange={(event) => setDraftProfile({ ...draftProfile, email: event.target.value })}
-                disabled={isSavingProfile || emailLocked}
+                disabled={isSavingProfile || isUploadingAvatar || emailLocked}
               />
               {emailLocked ? <small className="settings-field-hint">Email is already linked to this account.</small> : null}
             </label>
@@ -649,7 +795,7 @@ export const SettingsPage = ({
               <input
                 value={draftProfile.phone}
                 onChange={(event) => setDraftProfile({ ...draftProfile, phone: event.target.value })}
-                disabled={isSavingProfile || phoneLocked}
+                disabled={isSavingProfile || isUploadingAvatar || phoneLocked}
               />
               {phoneLocked ? <small className="settings-field-hint">Phone is already linked to this account.</small> : null}
             </label>
@@ -763,7 +909,9 @@ export const SettingsPage = ({
                     <strong>Email support</strong>
                     <small>{supportEmail}</small>
                   </span>
-                  <FiArrowRight aria-hidden="true" size={16} />
+                  <span className="settings-row__chevron" aria-hidden="true">
+                    <FiChevronRight size={18} />
+                  </span>
                 </button>
 
                 <button
@@ -781,7 +929,9 @@ export const SettingsPage = ({
                     <strong>Raise a ticket</strong>
                     <small>Trackable request for the KukuNotes team</small>
                   </span>
-                  <FiArrowRight aria-hidden="true" size={16} />
+                  <span className="settings-row__chevron" aria-hidden="true">
+                    <FiChevronRight size={18} />
+                  </span>
                 </button>
               </>
             ) : null}

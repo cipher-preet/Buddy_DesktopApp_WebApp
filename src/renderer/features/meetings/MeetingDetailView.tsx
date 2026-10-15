@@ -3,9 +3,7 @@ import {
   FiArrowLeft,
   FiCalendar,
   FiClock,
-  FiMoreHorizontal,
   FiRefreshCw,
-  FiShare2,
   FiTrash2,
   FiVideo,
 } from 'react-icons/fi';
@@ -1041,15 +1039,6 @@ export const MeetingDetailView = ({
                 </span>
               ) : null}
             </div>
-          </div>
-          <div className="meeting-detail__actions">
-            <button type="button" className="meeting-detail__share">
-              <FiShare2 aria-hidden="true" size={15} />
-              Share
-            </button>
-            <button type="button" className="meeting-detail__more" aria-label="More actions">
-              <FiMoreHorizontal size={18} />
-            </button>
           </div>
         </header>
 

@@ -83,15 +83,31 @@ export type WorkspaceTask = {
   priority: 'High' | 'Medium' | 'Low';
   status: 'done' | 'open' | 'review';
   createdAtLabel: string;
+  /** Local calendar day key (YYYY-MM-DD) used for date separators. */
+  dateGroupKey: string;
+  /** Display label for separators, e.g. 22-10-2026. */
+  dateGroupLabel: string;
+  sortAt: number;
 };
 
 export type WorkspaceNote = {
   id: string;
   title: string;
   excerpt: string;
-  /** The list API only sends a cut-off preview; the full body must be fetched by id. */
+  /** True when list payload is still a truncated preview and full body must be fetched by id. */
   isTruncated: boolean;
   dateLabel: string;
+  /** Local calendar day key (YYYY-MM-DD) used for date separators. */
+  dateGroupKey: string;
+  /** Display label for separators, e.g. 22-10-2026. */
+  dateGroupLabel: string;
+  sortAt: number;
+};
+
+export type DateGroupedItems<T> = {
+  key: string;
+  label: string;
+  items: T[];
 };
 
 export type ApiNoteDetail = {

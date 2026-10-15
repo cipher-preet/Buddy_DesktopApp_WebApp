@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { FiBell, FiCheckSquare, FiFileText, FiRefreshCw, FiVideo } from 'react-icons/fi';
 
 import type { SearchNavigationTarget } from '@/features/search/searchTypes';
 import {
-  useGetNotificationsQuery,
+  useGetNotificationsInfiniteQuery,
+  useGetUnreadNotificationCountQuery,
   useMarkAllNotificationsReadMutation,
   useMarkNotificationsReadMutation,
   type NotificationItem,
@@ -69,18 +70,33 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
   const [activeTab, setActiveTab] = useState<NotificationTab>('inbox');
   const [coords, setCoords] = useState<DropdownCoords>({ top: 0, left: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const filter = activeTab === 'unread' ? 'unread' : 'all';
-  const { data, isLoading, isError, isFetching, refetch } = useGetNotificationsQuery(filter, {
+  const {
+    data,
+    isLoading,
+    isError,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useGetNotificationsInfiniteQuery(filter, {
     skip: !isOpen,
-    refetchOnMountOrArgChange: 15,
+    refetchOnMountOrArgChange: 30,
+  });
+  const { data: unreadData } = useGetUnreadNotificationCountQuery(undefined, {
+    skip: !isOpen,
   });
   const [markRead] = useMarkNotificationsReadMutation();
   const [markAllRead, { isLoading: isMarkingAll }] = useMarkAllNotificationsReadMutation();
 
-  // Read items stay listed in the Unread tab until its next refetch, so rows don't jump on click.
-  const items = useMemo(() => data?.items ?? [], [data?.items]);
-  const unreadCount = data?.unreadCount ?? 0;
+  const items = useMemo(
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data?.pages],
+  );
+  const unreadCount = unreadData?.unreadCount ?? data?.pages[0]?.unreadCount ?? 0;
 
   const sections = useMemo(() => {
     const now = new Date();
@@ -111,7 +127,6 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
       const width = panelRef.current?.offsetWidth || 380;
       const gap = 10;
       const viewportPadding = 16;
-      // Prefer opening into the main content area (to the right of the sidebar icon).
       const preferredLeft = Math.max(rect.left, rect.right - 48);
       const maxLeft = window.innerWidth - width - viewportPadding;
       const left = Math.max(viewportPadding, Math.min(preferredLeft, maxLeft));
@@ -160,6 +175,17 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
     };
   }, [anchorRef, isOpen, onClose]);
 
+  const handleListScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (!hasNextPage || isFetchingNextPage) {
+      return;
+    }
+    const target = event.currentTarget;
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (remaining < 120) {
+      void fetchNextPage();
+    }
+  };
+
   if (!isOpen) {
     return null;
   }
@@ -176,9 +202,10 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
   };
 
   const now = new Date();
+  const isInitialLoading = isLoading || (isFetching && items.length === 0 && !isError);
 
   const renderBody = () => {
-    if (isLoading) {
+    if (isInitialLoading) {
       return (
         <div className="notifications-dropdown__list" aria-busy="true">
           {[0, 1, 2, 3].map((index) => (
@@ -194,7 +221,7 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
       );
     }
 
-    if (isError) {
+    if (isError && items.length === 0) {
       return (
         <div className="notifications-dropdown__empty">
           <strong>Couldn&apos;t load notifications</strong>
@@ -223,7 +250,11 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
     }
 
     return (
-      <div className="notifications-dropdown__list">
+      <div
+        ref={listRef}
+        className="notifications-dropdown__list"
+        onScroll={handleListScroll}
+      >
         {sections.map((section) => (
           <section key={section.label} className="notifications-section" aria-label={section.label}>
             <h3 className="notifications-section__label">{section.label}</h3>
@@ -266,11 +297,28 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
             </ul>
           </section>
         ))}
+
+        {hasNextPage ? (
+          <div className="notifications-dropdown__more">
+            {isFetchingNextPage ? (
+              <span className="notifications-dropdown__more-status" aria-live="polite">
+                Loading more…
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="notifications-dropdown__more-btn"
+                onClick={() => void fetchNextPage()}
+              >
+                Load more
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
     );
   };
 
-  // Portaled so the mobile drawer's transform and overflow can't trap or clip the fixed panel.
   return createPortal(
     <div
       ref={panelRef}
@@ -282,7 +330,9 @@ export const NotificationsDropdown = ({ isOpen, onClose, anchorRef, onNavigate }
       <header className="notifications-dropdown__header">
         <h2>
           Notifications
-          {isFetching && !isLoading ? <span className="notifications-dropdown__syncing" aria-hidden="true" /> : null}
+          {isFetching && !isInitialLoading && !isFetchingNextPage ? (
+            <span className="notifications-dropdown__syncing" aria-hidden="true" />
+          ) : null}
         </h2>
         <button
           type="button"

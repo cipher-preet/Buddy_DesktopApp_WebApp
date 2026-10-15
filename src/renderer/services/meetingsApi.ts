@@ -114,7 +114,7 @@ export const meetingsApi = api.injectEndpoints({
           nextCursor: page.nextCursor,
         };
       },
-      keepUnusedDataFor: 30,
+      keepUnusedDataFor: 120,
       providesTags: (result, _error, arg) => {
         const listId = arg.spaceId ? `LIST:${arg.spaceId}` : 'LIST';
         return result

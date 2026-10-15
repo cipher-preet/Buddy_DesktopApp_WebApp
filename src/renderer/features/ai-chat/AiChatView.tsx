@@ -33,6 +33,8 @@ import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 
 type AiChatViewProps = {
   compact?: boolean;
+  /** When false, defer sessions/spaces fetches (collapsed side panel). */
+  queriesEnabled?: boolean;
   /** Scopes the chat to one meeting: answers come from its transcript, and created tasks/notes link to it. */
   meetingId?: string;
 };
@@ -50,11 +52,16 @@ const MEETING_SUGGESTIONS = [
   'Create tasks from the action items',
 ];
 
-export const AiChatView = ({ compact = false, meetingId }: AiChatViewProps) => {
+export const AiChatView = ({
+  compact = false,
+  queriesEnabled = true,
+  meetingId,
+}: AiChatViewProps) => {
   const { showToast } = useToast();
   const { handleApiError } = usePlanGate();
   const userId = useAppSelector((state) => state.auth.user?.userId);
   const userName = useAppSelector((state) => state.auth.user?.name) || 'there';
+  const canQuery = Boolean(userId) && queriesEnabled;
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isContextOpen, setIsContextOpen] = useState(false);
@@ -87,7 +94,7 @@ export const AiChatView = ({ compact = false, meetingId }: AiChatViewProps) => {
     isFetchingNextPage: isFetchingMoreSessions,
   } = useGetChatSessionsInfiniteQuery(
     { userId: userId || '', limit: SESSIONS_PAGE_SIZE, ...(meetingId ? { meetingId } : {}) },
-    { skip: !userId },
+    { skip: !canQuery },
   );
 
   const {
@@ -95,7 +102,7 @@ export const AiChatView = ({ compact = false, meetingId }: AiChatViewProps) => {
     isLoading: isSpacesLoading,
     isError: isSpacesError,
     refetch: refetchSpaces,
-  } = useGetUserSpacesInfiniteQuery({ userId: userId || '', limit: 20 }, { skip: !userId });
+  } = useGetUserSpacesInfiniteQuery({ userId: userId || '', limit: 20 }, { skip: !canQuery });
 
   const [createChatSession] = useCreateChatSessionMutation();
   const [loadChatSession] = useLazyGetChatSessionByIdQuery();

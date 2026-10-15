@@ -405,7 +405,7 @@ export const RecordingProvider = ({ children }: { children: ReactNode }) => {
     userId,
   ]);
 
-  // Soft quota poll while recording — mirrors mobile force-stop behavior.
+  // Mid-session plan heartbeat: bill live burn, detect quota/period expiry, force-stop.
   useEffect(() => {
     if (status !== 'recording' && status !== 'paused') {
       return undefined;
@@ -415,25 +415,80 @@ export const RecordingProvider = ({ children }: { children: ReactNode }) => {
       return undefined;
     }
 
+    const forceStopForPlan = async (message: string, planCode?: string) => {
+      if (forceStopRef.current) {
+        return;
+      }
+      forceStopRef.current = true;
+      promptPlanUpgrade({
+        message,
+        resource: 'notesRecordingHours',
+        planCode,
+      });
+      showToast({ message, type: 'error' });
+      await stopRecording();
+    };
+
     const intervalId = window.setInterval(() => {
       void (async () => {
         try {
+          // Persist unreported listening time; server returns forceStop when quota hits 0.
+          try {
+            const report = await dispatch(
+              plansApi.endpoints.reportListeningUsage.initiate({ userId }),
+            ).unwrap();
+            if (report.forceStop) {
+              await forceStopForPlan(
+                'Notes recording time limit reached for your plan. Upgrade to continue recording.',
+                report.planCode,
+              );
+              return;
+            }
+          } catch (error) {
+            const restriction = getPlanRestriction(error);
+            if (restriction) {
+              await forceStopForPlan(
+                restriction.message ||
+                  'Notes recording time limit reached for your plan. Upgrade to continue recording.',
+                restriction.planCode,
+              );
+              return;
+            }
+          }
+
           const planStatus = await dispatch(
             plansApi.endpoints.getPlanStatus.initiate({ userId }, { forceRefetch: true }),
           ).unwrap();
-          const limit = planStatus.plan?.limits?.recordingHours;
-          const usedMs = planStatus.usage?.recordingMs;
-          if (typeof limit === 'number' && limit >= 0 && typeof usedMs === 'number') {
-            const remainingMs = limit * 3_600_000 - usedMs;
-            if (remainingMs <= 0 && !forceStopRef.current) {
-              forceStopRef.current = true;
-              promptPlanUpgrade({
-                message: 'Recording time limit reached for your plan. Upgrade to continue recording.',
-                resource: 'recordingHours',
-                planCode: planStatus.plan?.code,
-              });
-              await stopRecording();
-            }
+
+          const remainingMs = planStatus.entitlement?.notesRemainingMs;
+          const periodEnd = planStatus.subscription?.currentPeriodEnd
+            ? new Date(planStatus.subscription.currentPeriodEnd).getTime()
+            : null;
+          const planExpired =
+            planStatus.subscription?.status === 'expired' ||
+            planStatus.subscription?.status === 'cancelled' ||
+            (typeof periodEnd === 'number' &&
+              Number.isFinite(periodEnd) &&
+              periodEnd <= Date.now() &&
+              planStatus.subscription?.planCode !== 'free');
+
+          if (planExpired) {
+            await forceStopForPlan(
+              'Your paid plan period has ended. Recording stopped — upgrade to continue.',
+              planStatus.plan?.code || planStatus.subscription?.planCode,
+            );
+            return;
+          }
+
+          if (
+            typeof remainingMs === 'number' &&
+            remainingMs !== -1 &&
+            remainingMs <= 0
+          ) {
+            await forceStopForPlan(
+              'Notes recording time limit reached for your plan. Upgrade to continue recording.',
+              planStatus.plan?.code,
+            );
           }
         } catch {
           // ignore transient plan status failures
@@ -442,7 +497,7 @@ export const RecordingProvider = ({ children }: { children: ReactNode }) => {
     }, 15_000);
 
     return () => window.clearInterval(intervalId);
-  }, [dispatch, promptPlanUpgrade, status, stopRecording, userId]);
+  }, [dispatch, promptPlanUpgrade, showToast, status, stopRecording, userId]);
 
   useEffect(
     () => () => {

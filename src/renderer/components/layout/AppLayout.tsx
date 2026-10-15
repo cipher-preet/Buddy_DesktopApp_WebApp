@@ -4,7 +4,6 @@ import {
   FiBell,
   FiChevronsLeft,
   FiChevronsRight,
-  FiDownload,
   FiMenu,
   FiShare2,
   FiX,
@@ -21,7 +20,7 @@ import { StartListeningModal } from '@/components/recording/StartListeningModal'
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
 import type { SearchNavigationTarget } from '@/features/search/searchTypes';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
-import { useGetNotificationsQuery } from '@/services/notificationsApi';
+import { useGetUnreadNotificationCountQuery } from '@/services/notificationsApi';
 import { useGetPlanStatusQuery } from '@/services/plansApi';
 
 export type NavigationItem = {
@@ -29,12 +28,14 @@ export type NavigationItem = {
   icon: IconType;
   isActive?: boolean;
   onSelect?: () => void;
+  /** Small status tag next to the label (e.g. Beta). */
+  badge?: string;
 };
 
 type AppLayoutProps = {
   children: ReactNode;
   navigationItems: NavigationItem[];
-  viewMode?: 'default' | 'chat' | 'wide';
+  viewMode?: 'default' | 'chat' | 'wide' | 'canvas';
   onOpenSettings?: () => void;
   onSearchNavigate?: (target: SearchNavigationTarget) => void;
 };
@@ -47,38 +48,49 @@ const panelTabs: { id: SidePanelTab; label: string }[] = [
 const DRAWER_BREAKPOINT = 900;
 const PANEL_OVERLAY_BREAKPOINT = 1440;
 const NOTIFICATIONS_POLL_MS = 30_000;
-const DESKTOP_APP_STORE_URL = 'https://apps.microsoft.com/detail/9NCZSN8SMPQ1?hl=en-us&gl=IN&ocid=pdpshare';
-// The preload bridge exists only inside the desktop app, never on the website.
-const IS_DESKTOP_APP = typeof window !== 'undefined' && Boolean(window.electronApi);
 const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
-const formatRemainingRecording = (limitHours?: number, usedMs?: number) => {
-  if (limitHours === undefined || limitHours === null) {
-    return { label: 'Recording quota unavailable', remainingMs: 0, progress: 0, unlimited: false };
+const resolveNotesLimitHours = (limits?: {
+  notesRecordingHours?: number | null;
+  recordingHours?: number | null;
+} | null) => {
+  const notes = limits?.notesRecordingHours;
+  if (typeof notes === 'number' && (notes < 0 || notes > 0)) {
+    return notes;
   }
+  const legacy = limits?.recordingHours;
+  if (typeof legacy === 'number') {
+    return legacy;
+  }
+  return typeof notes === 'number' ? notes : undefined;
+};
 
-  if (limitHours < 0) {
+const formatRemainingFromMs = (remainingMs: number, limitMs?: number) => {
+  if (remainingMs < 0) {
     return { label: 'Unlimited recording left', remainingMs: -1, progress: 1, unlimited: true };
   }
 
-  const limitMs = limitHours * MS_PER_HOUR;
-  const consumedMs = Math.max(0, usedMs || 0);
-  const remainingMs = Math.max(0, limitMs - consumedMs);
-  const progress = limitMs > 0 ? Math.min(1, consumedMs / limitMs) : 0;
+  const safeRemaining = Math.max(0, remainingMs);
+  const progress =
+    typeof limitMs === 'number' && limitMs > 0
+      ? Math.min(1, Math.max(0, (limitMs - safeRemaining) / limitMs))
+      : safeRemaining <= 0
+        ? 1
+        : 0;
 
-  const totalMinutes = Math.floor(remainingMs / MS_PER_MINUTE);
+  const totalMinutes = Math.floor(safeRemaining / MS_PER_MINUTE);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
-  if (remainingMs <= 0) {
+  if (safeRemaining <= 0) {
     return { label: '0h 0m remaining', remainingMs: 0, progress: 1, unlimited: false };
   }
 
   if (hours <= 0) {
     return {
       label: `${minutes}m remaining`,
-      remainingMs,
+      remainingMs: safeRemaining,
       progress,
       unlimited: false,
     };
@@ -86,10 +98,24 @@ const formatRemainingRecording = (limitHours?: number, usedMs?: number) => {
 
   return {
     label: `${hours}h ${minutes}m remaining`,
-    remainingMs,
+    remainingMs: safeRemaining,
     progress,
     unlimited: false,
   };
+};
+
+const formatRemainingRecording = (limitHours?: number, usedMs?: number) => {
+  if (limitHours === undefined || limitHours === null) {
+    return { label: 'Recording quota unavailable', remainingMs: 0, progress: 0, unlimited: false };
+  }
+
+  if (limitHours < 0) {
+    return formatRemainingFromMs(-1);
+  }
+
+  const limitMs = limitHours * MS_PER_HOUR;
+  const consumedMs = Math.max(0, usedMs || 0);
+  return formatRemainingFromMs(Math.max(0, limitMs - consumedMs), limitMs);
 };
 
 export const AppLayout = ({
@@ -111,14 +137,27 @@ export const AppLayout = ({
   const planCode = planStatus?.plan?.code || planStatus?.subscription?.planCode || 'free';
   const planName = planStatus?.plan?.name || 'Free';
   const isFreePlan = planCode === 'free';
-  const recordingSummary = useMemo(
-    () =>
-      formatRemainingRecording(
-        planStatus?.plan?.limits?.recordingHours,
-        planStatus?.usage?.recordingMs,
-      ),
-    [planStatus?.plan?.limits?.recordingHours, planStatus?.usage?.recordingMs],
-  );
+  const recordingSummary = useMemo(() => {
+    const limitHours = resolveNotesLimitHours(planStatus?.plan?.limits);
+    const entitlementRemaining = planStatus?.entitlement?.notesRemainingMs;
+
+    // Prefer server entitlement (already limit − usage) when the catalog is current.
+    if (typeof entitlementRemaining === 'number') {
+      const limitMs =
+        typeof limitHours === 'number' && limitHours > 0 ? limitHours * MS_PER_HOUR : undefined;
+      return formatRemainingFromMs(entitlementRemaining, limitMs);
+    }
+
+    return formatRemainingRecording(
+      limitHours,
+      planStatus?.usage?.notesRecordingMs ?? planStatus?.usage?.recordingMs,
+    );
+  }, [
+    planStatus?.entitlement?.notesRemainingMs,
+    planStatus?.plan?.limits,
+    planStatus?.usage?.notesRecordingMs,
+    planStatus?.usage?.recordingMs,
+  ]);
 
   const planBenefit = useMemo(() => {
     const feature = planStatus?.plan?.features?.[0];
@@ -139,26 +178,54 @@ export const AppLayout = ({
   const [isListeningPickerOpen, setIsListeningPickerOpen] = useState(false);
   const [activePanelTab, setActivePanelTab] = useState<SidePanelTab>('ai-chat');
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
-  const { data: notificationFeed } = useGetNotificationsQuery('all', {
+  const { data: notificationBadge } = useGetUnreadNotificationCountQuery(undefined, {
     skip: !userId,
     pollingInterval: NOTIFICATIONS_POLL_MS,
     skipPollingIfUnfocused: true,
     refetchOnFocus: true,
+    refetchOnMountOrArgChange: 30,
   });
-  const unreadNotifications = notificationFeed?.unreadCount ?? 0;
+  const unreadNotifications = notificationBadge?.unreadCount ?? 0;
   const { startListening, isStarting, isVisible: isRecordingVisible } = useRecording();
-  const isChatView = viewMode === 'chat';
-  const hideSidePanel = viewMode === 'chat' || viewMode === 'wide';
+  const isChatView = viewMode === 'chat' || viewMode === 'canvas';
+  const hideSidePanel = viewMode === 'chat' || viewMode === 'wide' || viewMode === 'canvas';
 
   const openListeningPicker = () => {
+    const periodEnd = planStatus?.subscription?.currentPeriodEnd
+      ? new Date(planStatus.subscription.currentPeriodEnd).getTime()
+      : null;
+    const entitlementRemaining = planStatus?.entitlement?.notesRemainingMs;
+    const planInactive =
+      planStatus?.subscription?.status === 'expired' ||
+      planStatus?.subscription?.status === 'cancelled' ||
+      (typeof periodEnd === 'number' &&
+        Number.isFinite(periodEnd) &&
+        periodEnd <= Date.now() &&
+        planCode !== 'free');
+
+    if (!isPlanStatusLoading && planInactive) {
+      promptPlanUpgrade({
+        message: 'Your paid plan period has ended. Upgrade to continue recording.',
+        resource: 'notesRecordingHours',
+        planCode,
+      });
+      return;
+    }
+
+    const remainingMs =
+      typeof entitlementRemaining === 'number'
+        ? entitlementRemaining
+        : recordingSummary.remainingMs;
+
     if (
       !isPlanStatusLoading &&
       !recordingSummary.unlimited &&
-      recordingSummary.remainingMs <= 0
+      remainingMs !== -1 &&
+      remainingMs <= 0
     ) {
       promptPlanUpgrade({
-        message: 'Recording time limit reached for your plan. Upgrade to continue recording.',
-        resource: 'recordingHours',
+        message: 'Notes recording time limit reached for your plan. Upgrade to continue recording.',
+        resource: 'notesRecordingHours',
         planCode,
       });
       return;
@@ -330,7 +397,11 @@ export const AppLayout = ({
             aria-label="Open account settings"
           >
             <span className="avatar">
-              {(authUser?.name || authUser?.email || 'B').charAt(0).toUpperCase()}
+              {authUser?.avatar ? (
+                <img src={authUser.avatar} alt="" className="avatar__image" />
+              ) : (
+                (authUser?.name || authUser?.email || 'B').charAt(0).toUpperCase()
+              )}
             </span>
             <span className="account-card__text">
               <strong>{authUser?.name || 'KukuNotes User'}</strong>
@@ -353,23 +424,17 @@ export const AppLayout = ({
               >
                 <Icon aria-hidden="true" size={18} />
                 <span>{item.label}</span>
+                {item.badge ? (
+                  <span className="nav-list__badge" aria-label={item.badge}>
+                    {item.badge}
+                  </span>
+                ) : null}
               </button>
             );
           })}
         </nav>
 
         <div className="app-sidebar__footer">
-          {!IS_DESKTOP_APP ? (
-            <div className="download-card">
-              <strong>Get the desktop app</strong>
-              <p>Local, reliable, bot-free recording</p>
-              <a href={DESKTOP_APP_STORE_URL} target="_blank" rel="noopener noreferrer">
-                <span>Download</span>
-                <FiDownload aria-hidden="true" size={15} />
-              </a>
-            </div>
-          ) : null}
-
           <div className="plan-card">
             <div className="plan-card__row">
               <strong>
@@ -504,7 +569,10 @@ export const AppLayout = ({
                 </div>
 
                 <div className="meeting-panel__content" data-tab={activePanelTab}>
-                  <SidePanelContent activeTab={activePanelTab} />
+                  <SidePanelContent
+                    activeTab={activePanelTab}
+                    queriesEnabled={!isMeetingPanelCollapsed}
+                  />
                 </div>
               </aside>
             </>

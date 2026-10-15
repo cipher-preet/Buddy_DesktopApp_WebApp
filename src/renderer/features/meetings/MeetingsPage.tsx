@@ -29,21 +29,35 @@ import type { MeetingListItem } from './meetingsApiTypes';
 
 type ViewMode = 'grid' | 'list';
 
-const SPACES_PAGE_SIZE = 12;
+const SPACES_PAGE_SIZE = 20;
 const MEETINGS_PAGE_SIZE = 12;
 const NEXT_PAGE_SKELETONS = 3;
 
-const MeetingThumbnail = ({ meeting }: { meeting: MeetingListItem }) => (
-  <div className={`meeting-card__thumb meeting-card__thumb--${meeting.thumbnailTone}`}>
-    <img src={meeting.coverImage} alt="" className="meeting-card__image" />
-    <div className="meeting-card__thumb-overlay" aria-hidden="true">
-      <span className="meeting-card__play">
-        <FiVideo size={18} />
-      </span>
+const MeetingThumbnail = ({ meeting }: { meeting: MeetingListItem }) => {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(meeting.coverImage) && !imageFailed;
+
+  return (
+    <div className={`meeting-card__thumb meeting-card__thumb--${meeting.thumbnailTone}`}>
+      {showImage ? (
+        <img
+          src={meeting.coverImage}
+          alt=""
+          className="meeting-card__image"
+          loading="lazy"
+          decoding="async"
+          onError={() => setImageFailed(true)}
+        />
+      ) : null}
+      <div className="meeting-card__thumb-overlay" aria-hidden="true">
+        <span className="meeting-card__play">
+          <FiVideo size={18} />
+        </span>
+      </div>
+      {!meeting.ready ? <span className="meeting-card__status-pill">{meeting.statusLabel}</span> : null}
     </div>
-    {!meeting.ready ? <span className="meeting-card__status-pill">{meeting.statusLabel}</span> : null}
-  </div>
-);
+  );
+};
 
 type MeetingSpaceMenuProps = {
   meetingId: string;
@@ -356,7 +370,7 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
       limit: MEETINGS_PAGE_SIZE,
       ...(filterSpaceId ? { spaceId: filterSpaceId } : {}),
     },
-    { skip: !userId, refetchOnMountOrArgChange: true },
+    { skip: !userId },
   );
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteMeetingTarget | null>(null);

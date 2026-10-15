@@ -7,13 +7,21 @@ type ApiEnvelope<T> = {
 };
 
 export type PlanCode = 'free' | 'pro' | 'business';
-export type PlanInterval = 'forever' | 'monthly' | 'quarterly';
+export type PlanInterval = 'forever' | 'monthly' | 'yearly';
+export type MarketplaceAccess = 'none' | 'limited' | 'full';
 
 export type PlanLimits = {
-  spaces: number;
-  notes: number;
-  tasks: number;
+  notesRecordingHours?: number;
+  meetingRecordingHours?: number;
+  mindmaps?: number;
+  documents?: number;
+  goals?: number;
+  marketplaceAccess?: MarketplaceAccess;
+  notesRecordingMs?: number;
+  meetingRecordingMs?: number;
+  /** @deprecated Prefer notesRecordingHours */
   recordingHours?: number;
+  /** @deprecated Prefer notesRecordingMs */
   recordingMs?: number;
 };
 
@@ -23,7 +31,7 @@ export type Plan = {
   name: string;
   description: string;
   amount: number;
-  quarterlyAmount?: number;
+  yearlyAmount?: number;
   currency: string;
   interval: PlanInterval;
   limits: PlanLimits;
@@ -31,6 +39,15 @@ export type Plan = {
   features: string[];
   isActive: boolean;
   sortOrder?: number;
+};
+
+export type PlanEntitlement = {
+  planCode?: PlanCode | string;
+  status?: string;
+  currentPeriodEnd?: string | null;
+  notesRemainingMs?: number;
+  meetingRemainingMs?: number;
+  isListeningActive?: boolean;
 };
 
 export type PlanStatus = {
@@ -42,7 +59,11 @@ export type PlanStatus = {
     currentPeriodEnd?: string;
   };
   plan: Plan;
-  usage: PlanLimits;
+  usage: PlanLimits & {
+    notesRecordingMsPersisted?: number;
+    notesRecordingMsLiveUnreported?: number;
+  };
+  entitlement?: PlanEntitlement;
 };
 
 export type PaymentOrder = {
@@ -51,7 +72,7 @@ export type PaymentOrder = {
   amount: number;
   currency: string;
   plan: Plan;
-  interval?: 'monthly' | 'quarterly';
+  interval?: 'monthly' | 'yearly';
   paymentId: string;
   requiresPayment: boolean;
   message?: string;
@@ -113,6 +134,7 @@ export const plansApi = api.injectEndpoints({
       }),
       transformResponse: (response: ApiEnvelope<PlanStatus>) =>
         unwrapApiData(response, 'Unable to load plan status'),
+      keepUnusedDataFor: 120,
       providesTags: ['Plans'],
     }),
     activateFreePlan: builder.mutation<{ message?: string }, { userId: string }>({
@@ -125,12 +147,75 @@ export const plansApi = api.injectEndpoints({
         unwrapApiData(response, 'Unable to switch to Free plan'),
       invalidatesTags: ['Plans'],
     }),
+    validatePlanLimit: builder.mutation<
+      {
+        resource: string;
+        limit: number;
+        used: number;
+        planCode?: string;
+        remainingMs?: number;
+      },
+      {
+        userId: string;
+        resource:
+          | 'notesRecordingHours'
+          | 'meetingRecordingHours'
+          | 'mindmaps'
+          | 'documents'
+          | 'goals';
+        nextCount?: number;
+      }
+    >({
+      query: (body) => ({
+        url: 'plans/validate-limit',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (
+        response: ApiEnvelope<{
+          resource: string;
+          limit: number;
+          used: number;
+          planCode?: string;
+          remainingMs?: number;
+        }>,
+      ) => unwrapApiData(response, 'Unable to validate plan limit'),
+    }),
+    reportListeningUsage: builder.mutation<
+      {
+        resource?: string;
+        remainingMs?: number;
+        forceStop?: boolean;
+        planCode?: string;
+        active?: boolean;
+        addedMs?: number;
+        usedMs?: number;
+      },
+      { userId: string }
+    >({
+      query: (body) => ({
+        url: 'plans/report-listening',
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (
+        response: ApiEnvelope<{
+          resource?: string;
+          remainingMs?: number;
+          forceStop?: boolean;
+          planCode?: string;
+          active?: boolean;
+          addedMs?: number;
+          usedMs?: number;
+        }>,
+      ) => unwrapApiData(response, 'Unable to report listening usage'),
+    }),
     createPaymentOrder: builder.mutation<
       PaymentOrder,
       {
         userId: string;
         planCode: PlanCode;
-        interval?: 'monthly' | 'quarterly';
+        interval?: 'monthly' | 'yearly';
       }
     >({
       query: (body) => ({
@@ -179,7 +264,7 @@ export const plansApi = api.injectEndpoints({
       {
         userId: string;
         planCode: PlanCode;
-        interval?: 'monthly' | 'quarterly';
+        interval?: 'monthly' | 'yearly';
         name?: string | null;
         email?: string | null;
         phone?: string | number | null;
@@ -202,6 +287,8 @@ export const {
   useGetPlansQuery,
   useGetPlanStatusQuery,
   useActivateFreePlanMutation,
+  useValidatePlanLimitMutation,
+  useReportListeningUsageMutation,
   useCreatePaymentOrderMutation,
   useVerifyPaymentMutation,
   useLazyGetPaymentStatusQuery,

@@ -132,22 +132,29 @@ export const chatApi = api.injectEndpoints({
       },
       transformResponse: (response: ChatApiEnvelope<AskChatDto>) =>
         unwrapChatData(response, 'KukuNotes could not answer that question'),
-      invalidatesTags: (_result, _error, arg) => [
-        { type: 'ChatSessions', id: 'LIST' },
-        ...(arg.chatId ? [{ type: 'ChatMessages' as const, id: arg.chatId }] : []),
-        // Refresh home data after chat may have created tasks/notes/spaces.
-        'Spaces',
-        'Profile',
-        { type: 'CalendarFeed', id: 'LIST' },
-        ...(arg.meetingId
-          ? [
-              { type: 'Meetings' as const, id: `${arg.meetingId}:tasks` },
-              { type: 'Meetings' as const, id: `${arg.meetingId}:notes` },
-              'SpaceTasks' as const,
-              'SpaceNotes' as const,
-            ]
-          : []),
-      ],
+      invalidatesTags: (_result, _error, arg) => {
+        const spaceIds = [
+          ...(arg.spaceIds ?? []),
+          ...(arg.spaceId ? [arg.spaceId] : []),
+        ].filter(Boolean);
+
+        return [
+          { type: 'ChatSessions', id: 'LIST' },
+          ...(arg.chatId ? [{ type: 'ChatMessages' as const, id: arg.chatId }] : []),
+          { type: 'CalendarFeed', id: 'LIST' },
+          ...spaceIds.flatMap((spaceId) => [
+            { type: 'Spaces' as const, id: spaceId },
+            { type: 'SpaceTasks' as const, id: spaceId },
+            { type: 'SpaceNotes' as const, id: spaceId },
+          ]),
+          ...(arg.meetingId
+            ? [
+                { type: 'Meetings' as const, id: `${arg.meetingId}:tasks` },
+                { type: 'Meetings' as const, id: `${arg.meetingId}:notes` },
+              ]
+            : []),
+        ];
+      },
     }),
   }),
   overrideExisting: false,

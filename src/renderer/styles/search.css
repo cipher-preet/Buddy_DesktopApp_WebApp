@@ -3,7 +3,8 @@
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
-  max-width: 520px;
+  width: 100%;
+  max-width: min(520px, 100%);
 }
 
 .global-search .search-field {
@@ -473,6 +474,16 @@
 
   to {
     background-position: -200% 0;
+  }
+}
+
+@media (max-width: 1280px) {
+  .global-search {
+    max-width: none;
+  }
+
+  .search-field kbd {
+    display: none;
   }
 }
 

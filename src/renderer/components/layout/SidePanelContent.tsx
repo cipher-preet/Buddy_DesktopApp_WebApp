@@ -5,11 +5,16 @@ type SidePanelTab = 'ai-chat' | 'share';
 
 type SidePanelContentProps = {
   activeTab: SidePanelTab;
+  /** Defer chat/spaces API until the side panel is open. */
+  queriesEnabled?: boolean;
 };
 
-export const SidePanelContent = ({ activeTab }: SidePanelContentProps) => {
+export const SidePanelContent = ({
+  activeTab,
+  queriesEnabled = true,
+}: SidePanelContentProps) => {
   if (activeTab === 'ai-chat') {
-    return <AiChatView compact />;
+    return <AiChatView compact queriesEnabled={queriesEnabled} />;
   }
 
   return <SharePanel />;

@@ -85,5 +85,8 @@
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.12.0"
   }
 }

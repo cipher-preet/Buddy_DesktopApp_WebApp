@@ -7,6 +7,10 @@ import { ToastProvider } from './app/ToastProvider';
 import { store } from './app/store';
 import './styles/index.css';
 
+if (typeof window !== 'undefined' && window.electronApi) {
+  document.documentElement.dataset.desktop = 'true';
+}
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Provider store={store}>

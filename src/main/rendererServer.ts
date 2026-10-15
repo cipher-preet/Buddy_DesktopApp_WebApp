@@ -47,7 +47,11 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 const resolveApiTarget = (pathname: string) => {
-  if (pathname.startsWith('/api/v1/chat') || pathname.startsWith('/api/v1/speech')) {
+  if (
+    pathname.startsWith('/api/v1/chat') ||
+    pathname.startsWith('/api/v1/speech') ||
+    pathname.startsWith('/api/v1/mindmap')
+  ) {
     return CHAT_API_TARGET;
   }
   return pathname.startsWith('/api/') ? NODE_API_TARGET : null;

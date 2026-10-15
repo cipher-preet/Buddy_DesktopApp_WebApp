@@ -249,8 +249,20 @@ const createMainWindow = () => {
     icon: isDev
       ? join(app.getAppPath(), 'public/kukunotes-icon.png')
       : join(__dirname, '../../dist/kukunotes-icon.png'),
-    backgroundColor: '#f7f8fb',
+    backgroundColor: '#ffffff',
     show: false,
+    // Hide the native title bar; Windows caption buttons stay via titleBarOverlay.
+    frame: true,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 16, y: 16 } }
+      : {
+          titleBarOverlay: {
+            color: '#ffffff',
+            symbolColor: '#344054',
+            height: 64,
+          },
+        }),
     webPreferences: {
       // Electron ignores package.json "type": "module" for preloads, so it must be CommonJS.
       preload: join(__dirname, '../preload/preload.cjs'),
