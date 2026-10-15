@@ -68,3 +68,6 @@ Design tokens live in `src/renderer/styles/tokens.css`.
 - `--transition-base`: consistent animation timing.
 
 Add new variables there first, then consume them from `base.css`, `layout.css`, `components.css`, and feature/page styles.
+
+
+###
