@@ -34,6 +34,16 @@ export type MarketplaceAgentsPage = {
   hireEnabled: boolean;
 };
 
+type ApiMarketplaceAgentsPage = {
+  agents?: ApiMarketplaceAgent[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
+  hasMore?: boolean;
+  hireEnabled?: boolean;
+};
+
 export type MarketplaceAgentsQueryArg = {
   limit?: number;
 };
@@ -92,7 +102,7 @@ export const marketplaceApi = api.injectEndpoints({
           limit: queryArg.limit ?? DEFAULT_PAGE_SIZE,
         },
       }),
-      transformResponse: (response: ApiEnvelope<Partial<MarketplaceAgentsPage>>) => {
+      transformResponse: (response: ApiEnvelope<ApiMarketplaceAgentsPage>) => {
         const page = unwrap(response, 'Unable to load marketplace agents');
         const agents = Array.isArray(page.agents)
           ? page.agents.map(mapAgent).filter((agent): agent is MarketplaceAgent => Boolean(agent))
