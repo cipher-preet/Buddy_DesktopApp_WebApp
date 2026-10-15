@@ -6,7 +6,6 @@ import {
   FiDownload,
   FiFolder,
   FiSearch,
-  FiShare2,
   FiX,
   FiZap,
 } from 'react-icons/fi';
@@ -15,15 +14,21 @@ import type { IconType } from 'react-icons';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { useToast } from '@/app/ToastProvider';
 import { getStoredAuthToken } from '@/features/auth/authStorage';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import { getApiErrorMessage } from '@/services/apiErrors';
 import {
   subscribeToDocumentStatusEvents,
   type DocumentStatusEvent,
 } from '@/services/documentStatusEvents';
-import { documentsApi, useGenerateDocumentMutation } from '@/services/documentsApi';
+import {
+  documentsApi,
+  useGenerateDocumentMutation,
+  type SpaceDocument,
+} from '@/services/documentsApi';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 import { DEFAULT_API_BASE_URL } from '@shared/constants/app';
 
+import { DocumentPreviewModal } from './DocumentPreviewModal';
 import type { DocumentTemplate } from './documentTemplates';
 
 type DocumentTemplateDetailProps = {
@@ -86,6 +91,7 @@ export const DocumentTemplateDetail = ({
   initialSpaceName,
 }: DocumentTemplateDetailProps) => {
   const { showToast } = useToast();
+  const { handleApiError } = usePlanGate();
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
   const userId = user?.userId || '';
@@ -103,6 +109,7 @@ export const DocumentTemplateDetail = ({
   const [pickerStyle, setPickerStyle] = useState<CSSProperties>({});
   const [generation, setGeneration] = useState<GenerationStatus | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   const [generateDocument, { isLoading: isStartingGenerate }] = useGenerateDocumentMutation();
 
@@ -111,7 +118,10 @@ export const DocumentTemplateDetail = ({
     isLoading: isSpacesLoading,
     isError: isSpacesError,
     refetch: refetchSpaces,
-  } = useGetUserSpacesInfiniteQuery({ userId, limit: 40 }, { skip: !userId || !isPickerOpen });
+  } = useGetUserSpacesInfiniteQuery(
+    { userId, limit: 20, counts: 'none' },
+    { skip: !userId || !isPickerOpen },
+  );
 
   const spaces = useMemo(
     () => spacesData?.pages.flatMap((page) => page.spaces) ?? [],
@@ -346,6 +356,10 @@ export const DocumentTemplateDetail = ({
         },
       });
     } catch (error) {
+      if (handleApiError(error, 'Unable to start document generation')) {
+        setGeneration(null);
+        return;
+      }
       const message = getApiErrorMessage(error, 'Unable to start document generation');
       setGeneration({
         jobId: '',
@@ -358,13 +372,14 @@ export const DocumentTemplateDetail = ({
     }
   };
 
-  const handleDownload = async () => {
-    if (!generation?.documentId) {
+  const handleDownload = async (doc?: Pick<SpaceDocument, 'documentId' | 'fileName'> | null) => {
+    const documentId = doc?.documentId || generation?.documentId;
+    if (!documentId) {
       return;
     }
     setIsDownloading(true);
     try {
-      await downloadGeneratedDocx(generation.documentId, generation.fileName);
+      await downloadGeneratedDocx(documentId, doc?.fileName || generation?.fileName);
       showToast({ message: 'Download started.', type: 'success' });
     } catch (error) {
       showToast({
@@ -577,17 +592,15 @@ export const DocumentTemplateDetail = ({
                 ) : null}
               </div>
 
-              <button type="button" className="document-detail__secondary" disabled={isGenerating}>
-                Preview
-              </button>
-              <button
-                type="button"
-                className="document-detail__icon-btn"
-                aria-label="Share template"
-                disabled={isGenerating}
-              >
-                <FiShare2 aria-hidden="true" size={16} />
-              </button>
+              {generationReady && generation?.documentId ? (
+                <button
+                  type="button"
+                  className="document-detail__secondary"
+                  onClick={() => setIsPreviewOpen(true)}
+                >
+                  Preview
+                </button>
+              ) : null}
             </div>
           </div>
         </aside>
@@ -622,6 +635,24 @@ export const DocumentTemplateDetail = ({
           </article>
         </div>
       </div>
+
+      {isPreviewOpen && generation?.documentId ? (
+        <DocumentPreviewModal
+          documentId={generation.documentId}
+          fallback={{
+            documentId: generation.documentId,
+            fileName: generation.fileName,
+            templateTitle: template.title,
+            preview: {
+              title: template.title,
+              excerpt: template.tagline,
+              spaceName: confirmedSpace?.name,
+            },
+          }}
+          onClose={() => setIsPreviewOpen(false)}
+          onDownload={(doc) => handleDownload(doc)}
+        />
+      ) : null}
     </div>
   );
 };

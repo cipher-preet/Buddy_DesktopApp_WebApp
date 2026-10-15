@@ -258,6 +258,7 @@ export const App = () => {
       icon: FiShoppingBag,
       isActive: activeRoute === 'marketplace',
       onSelect: () => setActiveRoute('marketplace'),
+      badge: 'Beta',
     },
     {
       label: 'Settings',

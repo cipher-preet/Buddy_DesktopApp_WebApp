@@ -5,6 +5,7 @@ import { FiChevronsLeft, FiFolder, FiSearch } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
 import { getStoredAuthToken } from '@/features/auth/authStorage';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 import {
   useGenerateMindmapMutation,
@@ -21,7 +22,7 @@ import { MindmapCanvas } from './MindmapCanvas';
 
 import './mindmap.css';
 
-const SPACES_PAGE_SIZE = 10;
+const SPACES_PAGE_SIZE = 20;
 
 type CanvasMode = 'prompt' | 'view' | 'generate';
 
@@ -109,6 +110,7 @@ const GenerationPanel = ({
 
 export const MindmapPage = () => {
   const userId = useAppSelector((state) => state.auth.user?.userId);
+  const { handleApiError } = usePlanGate();
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('prompt');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -136,7 +138,7 @@ export const MindmapPage = () => {
     hasNextPage: hasMoreSpaces,
     isFetchingNextPage: isFetchingMoreSpaces,
   } = useGetUserSpacesInfiniteQuery(
-    { userId: userId || '', limit: SPACES_PAGE_SIZE },
+    { userId: userId || '', limit: SPACES_PAGE_SIZE, counts: 'none' },
     { skip: !userId },
   );
 
@@ -312,26 +314,35 @@ export const MindmapPage = () => {
         },
       });
     } catch (error) {
+      if (handleApiError(error, 'Unable to start mind map generation')) {
+        setCanvasMode('prompt');
+        setGeneration(null);
+        setGenerateError(null);
+        return;
+      }
+      const detail = (error as { data?: { detail?: unknown; message?: string } })?.data?.detail;
+      const detailMessage =
+        typeof detail === 'string'
+          ? detail
+          : detail && typeof detail === 'object' && 'message' in detail
+            ? String((detail as { message?: string }).message || '')
+            : '';
       const message =
-        error && typeof error === 'object' && 'data' in error
-          ? String(
-              (error as { data?: { detail?: string; message?: string } }).data?.detail ||
-                (error as { data?: { message?: string } }).data?.message ||
-                'Unable to start mind map generation',
-            )
-          : error instanceof Error
-            ? error.message
-            : 'Unable to start mind map generation';
-      setGenerateError(message);
+        detailMessage ||
+        (error && typeof error === 'object' && 'data' in error
+          ? String((error as { data?: { message?: string } }).data?.message || '')
+          : '') ||
+        (error instanceof Error ? error.message : 'Unable to start mind map generation');
+      setGenerateError(message || 'Unable to start mind map generation');
       setGeneration({
         jobId: '',
         mindmapId: '',
         status: 'FAILED',
         message: 'Generation failed',
-        error: message,
+        error: message || 'Unable to start mind map generation',
       });
     }
-  }, [generateMindmap, handleStatusEvent, selectedSpace, stopGenerationStream, userId]);
+  }, [generateMindmap, handleApiError, handleStatusEvent, selectedSpace, stopGenerationStream, userId]);
 
   const spacesErrorMessage =
     spacesError && typeof spacesError === 'object' && 'status' in spacesError

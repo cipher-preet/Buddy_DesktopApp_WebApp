@@ -43,7 +43,7 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
     pollingInterval: pollMs,
   });
   const spacesQuery = useGetUserSpacesInfiniteQuery(
-    { userId, limit: 24 },
+    { userId, limit: 20, counts: 'none' },
     { skip: !userId || data?.goal.latestStep?.control !== 'space_picker' },
   );
   const [answerGoal, answerState] = useAnswerGoalMutation();

@@ -34,7 +34,8 @@ import {
   buildPlanFaqs,
   getApiErrorMessage,
   getPlanCtaLabel,
-  getQuarterlyHint,
+  getPlanPriceDisplay,
+  getYearlyHint,
   resolveDesktopPlans,
   type BillingCycle,
   type CompareIcon,
@@ -55,12 +56,13 @@ const planIcons: Record<PlanId, typeof FiStar> = {
 };
 
 const compareIcons: Record<CompareIcon, typeof FiStar> = {
-  spaces: FiFolder,
   recording: FiMic,
-  languages: FiGlobe,
-  briefing: FiFileText,
+  meeting: FiClock,
+  mindmaps: FiGlobe,
+  documents: FiFileText,
   goals: FiTarget,
-  team: FiUsers,
+  marketplace: FiFolder,
+  languages: FiGlobe,
 };
 
 const formatUsageValue = (value?: number | null) => {
@@ -90,21 +92,20 @@ const isRetryableVerificationError = (message: string) =>
     message,
   );
 
-const formatRecordingUsage = (usage?: PlanLimits | null) => {
-  if (!usage) {
-    return '—';
-  }
-
-  if (typeof usage.recordingHours === 'number') {
-    if (usage.recordingHours < 0) {
+const formatRecordingUsage = (
+  hours?: number | null,
+  ms?: number | null,
+) => {
+  if (typeof hours === 'number') {
+    if (hours < 0) {
       return 'Unlimited';
     }
-    return `${usage.recordingHours} hrs`;
+    return `${hours} hrs`;
   }
 
-  if (typeof usage.recordingMs === 'number') {
-    const hours = Math.round((usage.recordingMs / 3_600_000) * 10) / 10;
-    return `${hours} hrs`;
+  if (typeof ms === 'number') {
+    const value = Math.round((ms / 3_600_000) * 10) / 10;
+    return `${value} hrs`;
   }
 
   return '—';
@@ -134,7 +135,7 @@ export const PlanDetailsModal = ({
     isError: isPlansError,
     error: plansError,
     refetch: refetchPlans,
-  } = useGetPlansQuery();
+  } = useGetPlansQuery(undefined, { refetchOnMountOrArgChange: true });
 
   const [activateFreePlan, { isLoading: isActivatingFree }] = useActivateFreePlanMutation();
   const [createPaymentOrder] = useCreatePaymentOrderMutation();
@@ -145,6 +146,8 @@ export const PlanDetailsModal = ({
     () => resolveDesktopPlans(plansData?.plans ?? null),
     [plansData?.plans],
   );
+  const hasBackendPlans = desktopPlans.length > 0;
+  const plansUnavailable = isPlansError || (!isPlansLoading && !hasBackendPlans);
 
   const compareRows = useMemo(() => buildCompareRows(desktopPlans), [desktopPlans]);
   const planFaqs = useMemo(() => buildPlanFaqs(desktopPlans), [desktopPlans]);
@@ -161,8 +164,11 @@ export const PlanDetailsModal = ({
   );
 
   const isCurrentSelected = selectedPlan?.id === currentPlanId;
-  const quarterlyHint =
-    selectedPlan && billingCycle === 'quarterly' ? getQuarterlyHint(selectedPlan) : null;
+  const selectedPriceDisplay = selectedPlan
+    ? getPlanPriceDisplay(selectedPlan, billingCycle)
+    : null;
+  const yearlyHint =
+    selectedPlan && billingCycle === 'yearly' ? getYearlyHint(selectedPlan) : null;
   const SelectedIcon = selectedPlan ? planIcons[selectedPlan.id] : FiStar;
   const isSubmitting = isActivatingFree || checkoutPhase !== 'idle';
 
@@ -388,16 +394,26 @@ export const PlanDetailsModal = ({
             </div>
             <div className="settings-plan-banner__stats">
               <span>
-                <strong>{formatUsageValue(usage?.spaces)}</strong>
-                Spaces
-              </span>
-              <span>
-                <strong>{formatUsageValue(usage?.notes)}</strong>
+                <strong>
+                  {formatRecordingUsage(
+                    usage?.notesRecordingHours ?? usage?.recordingHours,
+                    usage?.notesRecordingMs ?? usage?.recordingMs,
+                  )}
+                </strong>
                 Notes
               </span>
               <span>
-                <strong>{formatRecordingUsage(usage)}</strong>
-                Recording
+                <strong>
+                  {formatRecordingUsage(
+                    usage?.meetingRecordingHours,
+                    usage?.meetingRecordingMs,
+                  )}
+                </strong>
+                Meetings
+              </span>
+              <span>
+                <strong>{formatUsageValue(usage?.goals)}</strong>
+                Goals
               </span>
             </div>
           </div>
@@ -409,10 +425,14 @@ export const PlanDetailsModal = ({
             </div>
           ) : null}
 
-          {isPlansError ? (
+          {plansUnavailable ? (
             <div className="settings-inline-state settings-inline-state--error" role="alert">
               <FiAlertCircle aria-hidden="true" size={16} />
-              <p>{getApiErrorMessage(plansError, 'Unable to load plans')}</p>
+              <p>
+                {isPlansError
+                  ? getApiErrorMessage(plansError, 'Unable to load plans')
+                  : 'No plans returned from the server.'}
+              </p>
               <button type="button" className="home-retry-button" onClick={() => void refetchPlans()}>
                 <FiRefreshCw aria-hidden="true" size={13} />
                 Retry
@@ -420,7 +440,7 @@ export const PlanDetailsModal = ({
             </div>
           ) : null}
 
-          {!isPlansLoading && !isPlansError && selectedPlan ? (
+          {!isPlansLoading && !plansUnavailable && selectedPlan && selectedPriceDisplay ? (
             <>
               <div className="settings-plan-billing">
                 <span>Billing cycle</span>
@@ -439,7 +459,7 @@ export const PlanDetailsModal = ({
                         onClick={() => setBillingCycle(option.id)}
                       >
                         {option.label}
-                        {option.id === 'quarterly' ? <em>Save more</em> : null}
+                        {option.id === 'yearly' ? <em>Save more</em> : null}
                       </button>
                     );
                   })}
@@ -472,24 +492,29 @@ export const PlanDetailsModal = ({
                     <p>{selectedPlan.tagline}</p>
                   </div>
                   <div className="settings-plan-detail-card__price">
-                    <strong>{selectedPlan.prices[billingCycle]}</strong>
-                    <small>{selectedPlan.cadence[billingCycle]}</small>
-                    {quarterlyHint ? <em>{quarterlyHint}</em> : null}
+                    <strong>{selectedPriceDisplay.primary}</strong>
+                    <small>{selectedPriceDisplay.cadence}</small>
+                    {selectedPriceDisplay.fullPayment ? (
+                      <span className="settings-plan-detail-card__full-payment">
+                        {selectedPriceDisplay.fullPayment}
+                      </span>
+                    ) : null}
+                    {yearlyHint ? <em>{yearlyHint}</em> : null}
                   </div>
                 </div>
 
                 <div className="settings-plan-limits">
                   <span>
-                    <FiUsers aria-hidden="true" size={14} />
-                    {selectedPlan.limits.spaces} spaces
+                    <FiMic aria-hidden="true" size={14} />
+                    {selectedPlan.limits.notesRecordingHours} notes
                   </span>
                   <span>
                     <FiClock aria-hidden="true" size={14} />
-                    {selectedPlan.limits.recordingHours} recording
+                    {selectedPlan.limits.meetingRecordingHours} meetings
                   </span>
                   <span>
-                    <FiZap aria-hidden="true" size={14} />
-                    {selectedPlan.limits.notes} notes
+                    <FiTarget aria-hidden="true" size={14} />
+                    {selectedPlan.limits.goals} goals
                   </span>
                 </div>
 
@@ -595,7 +620,13 @@ export const PlanDetailsModal = ({
           <button
             className="settings-primary-button"
             type="button"
-            disabled={!selectedPlan || isCurrentSelected || isSubmitting || isPlansLoading || isPlansError}
+            disabled={
+              !selectedPlan ||
+              isCurrentSelected ||
+              isSubmitting ||
+              isPlansLoading ||
+              plansUnavailable
+            }
             onClick={() => void handleContinue()}
           >
             {isSubmitting && checkoutPhase !== 'paying' ? (
@@ -662,7 +693,8 @@ const CompareValue = ({
 
 const PlanCard = ({ plan, billingCycle, selected, isCurrent, disabled = false, onSelect }: PlanCardProps) => {
   const Icon = planIcons[plan.id];
-  const hint = billingCycle === 'quarterly' ? getQuarterlyHint(plan) : null;
+  const price = getPlanPriceDisplay(plan, billingCycle);
+  const hint = billingCycle === 'yearly' ? getYearlyHint(plan) : null;
 
   return (
     <button
@@ -677,8 +709,11 @@ const PlanCard = ({ plan, billingCycle, selected, isCurrent, disabled = false, o
         {isCurrent ? <FiCheck aria-hidden="true" size={14} /> : <Icon aria-hidden="true" size={14} />}
       </span>
       <strong>{plan.name}</strong>
-      <b>{plan.prices[billingCycle]}</b>
-      <small>{plan.cadence[billingCycle]}</small>
+      <b>{price.primary}</b>
+      <small>{price.cadence}</small>
+      {price.fullPayment ? (
+        <span className="settings-plan-card__full-payment">{price.fullPayment}</span>
+      ) : null}
       {hint ? <em>{hint}</em> : <em className="is-empty">&nbsp;</em>}
       {isCurrent ? <span className="settings-plan-card__current">Current</span> : null}
     </button>

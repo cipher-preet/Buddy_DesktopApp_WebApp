@@ -1,8 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { FiCalendar, FiFileText } from 'react-icons/fi';
 
-import { useGetNoteByIdQuery } from '@/services/homeApi';
-
 import { groupItemsByDate } from './homeMappers';
 import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote } from './homeTypes';
@@ -71,43 +69,14 @@ const renderNoteExcerpt = (excerpt: string): ReactNode => {
 
 type NoteCardBodyProps = {
   note: WorkspaceNote;
-  spaceId: string;
 };
 
-const NoteCardBody = ({ note, spaceId }: NoteCardBodyProps) => {
-  const { data: fullNote, isFetching, isError, refetch } = useGetNoteByIdQuery(
-    { noteId: note.id, spaceId },
-    { skip: !note.isTruncated || !spaceId },
-  );
+/** Use list preview only — full body loads on edit, not per card. */
+const NoteCardBody = ({ note }: NoteCardBodyProps) => {
+  const body = note.excerpt.trim();
 
-  const body = (fullNote?.body?.trim() || note.excerpt).trim();
-
-  if (!body && !note.isTruncated) {
+  if (!body) {
     return <p className="note-card__excerpt is-empty">No content yet.</p>;
-  }
-
-  if (note.isTruncated && isFetching && !fullNote) {
-    return (
-      <div className="note-card__excerpt is-loading" aria-busy="true">
-        <span />
-        <span />
-        <span />
-      </div>
-    );
-  }
-
-  if (note.isTruncated && isError && !fullNote) {
-    return (
-      <div className="note-card__excerpt">
-        <p className="note-card__paragraph">{note.excerpt}</p>
-        <p className="note-card__load-error">
-          Couldn’t load the full note.{' '}
-          <button type="button" onClick={() => void refetch()}>
-            Retry
-          </button>
-        </p>
-      </div>
-    );
   }
 
   return <div className="note-card__excerpt is-full">{renderNoteExcerpt(body)}</div>;
@@ -126,7 +95,7 @@ type NoteBoardProps = {
 
 export const NoteBoard = ({
   notes,
-  spaceId,
+  spaceId: _spaceId,
   layout,
   openItemMenuId,
   searchHitId,
@@ -182,7 +151,7 @@ export const NoteBoard = ({
                       />
                     </div>
                   </header>
-                  <NoteCardBody note={note} spaceId={spaceId} />
+                  <NoteCardBody note={note} />
                   <footer className="note-card__footer">
                     <span>
                       <FiCalendar aria-hidden="true" size={12} />

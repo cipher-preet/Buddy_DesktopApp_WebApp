@@ -27,6 +27,9 @@ export type ApiMeetingListItem = {
   mergeMissingSequenceCount?: number | null;
   mergePresentChunkCount?: number | null;
   finalRecordingS3Key?: string | null;
+  thumbnailS3Key?: string | null;
+  /** Signed JPEG URL for the meeting card; null until a frame is ready. */
+  thumbnailUrl?: string | null;
   createdAt?: string | Date | null;
   updatedAt?: string | Date | null;
   recordingStatus?: string | null;

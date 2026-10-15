@@ -95,7 +95,8 @@
   line-height: 1.7;
 }
 
-.documentation-article ul {
+.documentation-article ul,
+.documentation-article ol {
   display: grid;
   gap: 10px;
   margin: 16px 0 0;
@@ -103,6 +104,10 @@
   color: #171717;
   font-size: 1rem;
   line-height: 1.65;
+}
+
+.documentation-article ol {
+  gap: 12px;
 }
 
 .documentation-article li strong {
@@ -124,7 +129,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 20px;
+  margin-top: 12px;
   padding: 20px 24px 24px;
   border: 1px solid #ebebeb;
   border-radius: 8px;
@@ -134,6 +139,10 @@
   transition:
     border-color 160ms ease,
     background 160ms ease;
+}
+
+.documentation-next:first-of-type {
+  margin-top: 20px;
 }
 
 .documentation-next:hover {

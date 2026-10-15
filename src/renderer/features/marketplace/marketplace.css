@@ -10,9 +10,36 @@
 
 .marketplace-head {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   min-height: 36px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.marketplace-plan-note {
+  margin: 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.marketplace-buy-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.marketplace-get.is-buy {
+  background: #111827;
+  color: #fff;
 }
 
 .marketplace-head h1 {
@@ -193,17 +220,21 @@
   white-space: nowrap;
 }
 
-.marketplace-get:hover {
+.marketplace-get:hover:not(:disabled) {
   background: #2563eb;
 }
 
-.marketplace-get.is-added {
-  color: #1d4ed8;
-  background: #eff6ff;
+.marketplace-get:disabled,
+.marketplace-get.is-disabled {
+  cursor: not-allowed;
+  color: #9ca3af;
+  background: #e5e7eb;
+  opacity: 1;
 }
 
-.marketplace-get.is-added:hover {
-  background: #dbeafe;
+.marketplace-get:disabled:hover,
+.marketplace-get.is-disabled:hover {
+  background: #e5e7eb;
 }
 
 @media (max-width: 720px) {
@@ -217,6 +248,60 @@
     grid-column: 2;
     justify-self: start;
   }
+}
+
+.marketplace-state {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 36px 4px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.marketplace-state p {
+  margin: 0;
+}
+
+.marketplace-state[aria-busy='true'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.marketplace-pagination {
+  display: grid;
+  gap: 10px;
+  padding: 8px 4px 0;
+}
+
+.marketplace-pagination__sentinel {
+  height: 1px;
+}
+
+.marketplace-pagination__status,
+.marketplace-pagination__end {
+  margin: 0;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.marketplace-pagination__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.marketplace-pagination__error {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.marketplace-pagination__error p {
+  margin: 0;
 }
 
 .get-agent-backdrop {
@@ -296,8 +381,13 @@
   background: #3b82f6;
 }
 
-.get-agent-modal__primary:hover {
+.get-agent-modal__primary:hover:not(:disabled) {
   background: #2563eb;
+}
+
+.get-agent-modal__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .get-agent-modal__ghost {
@@ -308,6 +398,15 @@
 
 .get-agent-modal__ghost:hover {
   background: #f9fafb;
+}
+
+.get-agent-modal__coming-soon {
+  margin: 2px 0 0;
+  color: #9ca3af;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
 .get-agent-modal__art {

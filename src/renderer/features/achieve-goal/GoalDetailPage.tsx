@@ -4,9 +4,7 @@ import {
   FiAtSign,
   FiBox,
   FiChevronRight,
-  FiFileText,
   FiLink2,
-  FiPlus,
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import { IoDiamondOutline } from 'react-icons/io5';
@@ -87,16 +85,13 @@ const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: st
 
   useEffect(() => {
     const node = wrapRef.current;
-    if (!node) return undefined;
+    const canvas = node?.querySelector<HTMLElement>('.gd-chart__canvas');
+    if (!node || !canvas) return undefined;
 
     const update = () => {
-      const width = Math.max(240, node.clientWidth);
-      const legend = node.querySelector('.gd-chart__legend');
-      const legendHeight = legend instanceof HTMLElement ? legend.offsetHeight + 12 : 36;
-      // Fill the stage on tall screens so Strategies can sit on the remaining space (no dead gap).
-      const available = Math.max(220, node.clientHeight - legendHeight);
-      const byWidth = Math.round(Math.max(220, width * 0.46));
-      const height = Math.round(Math.min(560, Math.max(byWidth, available)));
+      // Height comes from CSS (--gd-chart-height), same breakpoint treatment as Recommendations.
+      const width = Math.max(240, Math.round(canvas.clientWidth));
+      const height = Math.max(160, Math.round(canvas.clientHeight));
       setSize((current) =>
         current.width === width && current.height === height ? current : { width, height },
       );
@@ -104,7 +99,7 @@ const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: st
 
     update();
     const observer = new ResizeObserver(update);
-    observer.observe(node);
+    observer.observe(canvas);
     return () => observer.disconnect();
   }, []);
 
@@ -156,15 +151,17 @@ const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: st
         </span>
         <small className="gd-chart__live">Live</small>
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        width={width}
-        height={height}
-        role="img"
-        aria-label="Real reduction versus targeted reduction"
-        onMouseMove={(event) => setHoverIndex(readIndex(event.clientX, event.currentTarget))}
-        onMouseLeave={() => setHoverIndex(null)}
-      >
+      <div className="gd-chart__canvas">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Real reduction versus targeted reduction"
+          onMouseMove={(event) => setHoverIndex(readIndex(event.clientX, event.currentTarget))}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#9ebcf2" stopOpacity="0.55" />
@@ -224,7 +221,8 @@ const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: st
 
         {hover ? <line x1={hoverX} y1={pad.top} x2={hoverX} y2={baseline} className="gd-chart__crosshair" /> : null}
         <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="transparent" />
-      </svg>
+        </svg>
+      </div>
 
       {hover ? (
         <div
@@ -489,21 +487,16 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
         <GoalStrategyDrawer item={selectedStrategy} onClose={() => setSelectedStrategyId(null)} />
 
         <div className="gd-main" ref={mainRef}>
-          <div className="gd-main__top">
-            <section className="gd-stage" aria-label="Reduction chart">
-              <h2 className="gd-chart-title">Real reduction vs. Targeted reduction</h2>
-              <ReductionChart points={detail.chart.points} years={detail.chart.years} />
-            </section>
+          <section className="gd-stage" aria-label="Reduction chart">
+            <h2 className="gd-chart-title">Real reduction vs. Targeted reduction</h2>
+            <ReductionChart points={detail.chart.points} years={detail.chart.years} />
+          </section>
 
-            <aside className="gd-recs" aria-label="Recommendations">
-              <div className="gd-recs__actions">
-                <button type="button" className="gd-btn gd-btn--primary">
-                  <FiFileText size={14} aria-hidden="true" />
-                  Generate report
-                </button>
-              </div>
-
-              <h2>Recommendations</h2>
+          <aside className="gd-recs" aria-label="Recommendations">
+            <h2>Recommendations</h2>
+            {detail.recommendations.length === 0 ? (
+              <p className="gd-recs__empty">No recommendations yet for this goal.</p>
+            ) : (
               <ul className="gd-rec-list">
                 {detail.recommendations.map((item) => {
                   const Icon = item.icon;
@@ -517,7 +510,7 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                         <span className="gd-rec-list__icon" aria-hidden="true">
                           <Icon size={15} strokeWidth={1.7} />
                         </span>
-                        <div>
+                        <div className="gd-rec__copy">
                           <strong>{item.title}</strong>
                           <p>
                             {item.before}
@@ -529,8 +522,8 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                   );
                 })}
               </ul>
-            </aside>
-          </div>
+            )}
+          </aside>
 
           <section className="gd-strategies" aria-label="Strategies">
             <div className="gd-strategies__head">
@@ -538,10 +531,6 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                 Strategies
                 <span className="gd-count">{detail.strategies.length}</span>
               </h2>
-              <button type="button" className="gd-new-strategy">
-                <FiPlus size={15} aria-hidden="true" />
-                New strategy
-              </button>
             </div>
 
             <div className="gd-strategies__wrap">

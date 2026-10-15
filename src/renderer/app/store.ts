@@ -9,6 +9,7 @@ import '@/services/chatApi';
 import '@/services/documentTemplatesApi';
 import '@/services/documentsApi';
 import '@/services/homeApi';
+import '@/services/marketplaceApi';
 import '@/services/meetingsApi';
 import '@/services/notificationsApi';
 import '@/services/plansApi';

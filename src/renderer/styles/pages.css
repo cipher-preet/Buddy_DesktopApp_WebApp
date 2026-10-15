@@ -614,9 +614,7 @@
   font: inherit;
   font-size: var(--font-size-sm);
   text-transform: none;
-  transition:
-    border-color var(--transition-base),
-    box-shadow var(--transition-base);
+  transition: border-color var(--transition-base);
 }
 
 .home-create-modal .custom-field__input {
@@ -631,15 +629,17 @@
   line-height: 1.5;
 }
 
-.home-create-modal .custom-field__input:hover,
-.home-create-modal .custom-field__textarea:hover {
+.home-create-modal .custom-field__input:hover:not(:focus),
+.home-create-modal .custom-field__textarea:hover:not(:focus) {
   border-color: var(--color-border-strong);
 }
 
 .home-create-modal .custom-field__input:focus,
-.home-create-modal .custom-field__textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: var(--focus-ring);
+.home-create-modal .custom-field__textarea:focus,
+.home-create-modal .custom-field__input:focus-visible,
+.home-create-modal .custom-field__textarea:focus-visible {
+  border: 1px solid var(--color-primary);
+  box-shadow: none;
   outline: none;
 }
 
@@ -3133,10 +3133,20 @@
   font-weight: var(--font-weight-bold);
 }
 
+.profile-avatar__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .profile-avatar__edit {
   position: absolute;
   right: 0;
   bottom: 0;
+  z-index: 1;
   display: grid;
   width: 28px;
   height: 28px;
@@ -3145,6 +3155,67 @@
   border-radius: var(--radius-pill);
   color: var(--color-primary);
   background: var(--color-surface);
+}
+
+.settings-profile-photo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.settings-profile-photo__preview {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.settings-profile-photo__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-profile-photo__busy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.settings-profile-photo__meta {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.settings-profile-photo__meta strong {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.settings-profile-photo__meta p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.settings-profile-photo__meta .settings-secondary-button {
+  margin-top: 6px;
+  min-height: 36px;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: var(--font-size-sm);
 }
 
 .profile-summary-card h2 {
@@ -3257,17 +3328,35 @@
   font-size: var(--font-size-xs);
 }
 
-.settings-row__chevron,
-.settings-row__trailing {
+.settings-row__chevron {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
   color: var(--color-text-muted);
-  font-size: var(--font-size-xl);
+  line-height: 0;
+}
+
+.settings-row__chevron svg {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 .settings-row__trailing {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.settings-row__trailing > strong {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
 }
 
 .settings-row--danger,
@@ -3677,8 +3766,8 @@
   line-height: 1.45;
 }
 
-.settings-support-option > svg {
-  color: var(--color-primary);
+.settings-support-option .settings-row__chevron {
+  color: var(--color-text-muted);
 }
 
 .settings-help-note {
@@ -3987,6 +4076,13 @@
   font-style: normal;
 }
 
+.settings-plan-card__full-payment {
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+}
+
 .settings-plan-card em:not(.is-empty) {
   color: #8a5b00;
   font-weight: var(--font-weight-semibold);
@@ -4051,6 +4147,13 @@
 .settings-plan-detail-card__price strong {
   color: var(--color-text);
   font-size: var(--font-size-xl);
+}
+
+.settings-plan-detail-card__full-payment {
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
 }
 
 .settings-plan-detail-card__price em {
@@ -5624,9 +5727,11 @@
 }
 
 .cal-add-modal .custom-field__input:focus,
-.cal-add-modal .custom-field__textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: var(--focus-ring);
+.cal-add-modal .custom-field__textarea:focus,
+.cal-add-modal .custom-field__input:focus-visible,
+.cal-add-modal .custom-field__textarea:focus-visible {
+  border: 1px solid var(--color-primary);
+  box-shadow: none;
   outline: none;
 }
 

@@ -270,11 +270,13 @@ export const mapNote = (note: ApiNoteCard): WorkspaceNote => {
   const preview = note.bodyPreview?.trim() || '';
   const stamp = note.updatedAt || note.createdAt;
   const dateGroup = toDateGroupMeta(stamp);
+  // List payloads ship bodyPreview only; full body arrives on get-by-id / edit.
+  const excerpt = preview || body;
 
   return {
     id: String(note.id),
     title: note.title || 'Untitled note',
-    excerpt: body || preview,
+    excerpt,
     isTruncated: !body && preview.length >= NOTE_PREVIEW_LENGTH,
     dateLabel: formatNoteDate(stamp),
     dateGroupKey: dateGroup.dateGroupKey,

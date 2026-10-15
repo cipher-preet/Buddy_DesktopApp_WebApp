@@ -70,7 +70,8 @@ type DashboardPageProps = {
   onFocusTargetHandled?: () => void;
 };
 
-const SPACES_PAGE_SIZE = 10;
+/** Shared with AI chat side panel so RTK reuses one spaces cache entry. */
+const SPACES_PAGE_SIZE = 20;
 const ITEMS_PAGE_SIZE = 50;
 /** Upper bound on extra pages fetched while locating a search result. */
 const FOCUS_MAX_PAGE_LOADS = 30;
@@ -246,34 +247,6 @@ export const DashboardPage = ({
     const done = tasks.filter((task) => completedTaskIds.has(task.id)).length;
     return { all: tasks.length, open: tasks.length - done, done };
   }, [completedTaskIds, tasks]);
-
-  useEffect(() => {
-    if (!shouldLoadTasks || isTasksError || !hasMoreTasks || isTasksLoading || isFetchingMoreTasks) {
-      return;
-    }
-    void fetchNextTasksPage();
-  }, [
-    fetchNextTasksPage,
-    hasMoreTasks,
-    isFetchingMoreTasks,
-    isTasksError,
-    isTasksLoading,
-    shouldLoadTasks,
-  ]);
-
-  useEffect(() => {
-    if (!shouldLoadNotes || isNotesError || !hasMoreNotes || isNotesLoading || isFetchingMoreNotes) {
-      return;
-    }
-    void fetchNextNotesPage();
-  }, [
-    fetchNextNotesPage,
-    hasMoreNotes,
-    isFetchingMoreNotes,
-    isNotesError,
-    isNotesLoading,
-    shouldLoadNotes,
-  ]);
 
   const changeNoteLayout = (layout: NoteLayout) => {
     setNoteLayout(layout);
@@ -836,8 +809,7 @@ export const DashboardPage = ({
                     <strong>{space.name}</strong>
                     <small>
                       {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} ·{' '}
-                      {space.notesCount} {space.notesCount === 1 ? 'note' : 'notes'} ·{' '}
-                      {space.updatedAtLabel}
+                      {space.notesCount} {space.notesCount === 1 ? 'note' : 'notes'}
                     </small>
                   </span>
                 </button>
@@ -1101,8 +1073,21 @@ export const DashboardPage = ({
                         }
                       />
 
+                      {hasMoreTasks ? (
+                        <div className="home-load-more">
+                          <button
+                            type="button"
+                            className="home-retry-button"
+                            disabled={isFetchingMoreTasks}
+                            onClick={() => void fetchNextTasksPage()}
+                          >
+                            {isFetchingMoreTasks ? 'Loading…' : 'Load more tasks'}
+                          </button>
+                        </div>
+                      ) : null}
+
                       {isFetchingMoreTasks ? (
-                        <p className="home-sync-hint">Loading all tasks…</p>
+                        <p className="home-sync-hint">Loading more tasks…</p>
                       ) : null}
 
                       {isTasksFetching && !isTasksLoading && !isFetchingMoreTasks ? (
@@ -1168,8 +1153,21 @@ export const DashboardPage = ({
                         }
                       />
 
+                      {hasMoreNotes ? (
+                        <div className="home-load-more">
+                          <button
+                            type="button"
+                            className="home-retry-button"
+                            disabled={isFetchingMoreNotes}
+                            onClick={() => void fetchNextNotesPage()}
+                          >
+                            {isFetchingMoreNotes ? 'Loading…' : 'Load more notes'}
+                          </button>
+                        </div>
+                      ) : null}
+
                       {isFetchingMoreNotes ? (
-                        <p className="home-sync-hint">Loading all notes…</p>
+                        <p className="home-sync-hint">Loading more notes…</p>
                       ) : null}
 
                       {isNotesFetching && !isNotesLoading && !isFetchingMoreNotes ? (

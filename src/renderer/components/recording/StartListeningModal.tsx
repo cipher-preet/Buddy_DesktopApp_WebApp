@@ -50,7 +50,10 @@ export const StartListeningModal = ({
     isFetchingNextPage,
     fetchNextPage,
     refetch,
-  } = useGetUserSpacesInfiniteQuery({ userId, limit: 12 }, { skip: !userId });
+  } = useGetUserSpacesInfiniteQuery(
+    { userId, limit: 20, counts: 'none' },
+    { skip: !userId },
+  );
 
   const [createSpace, { isLoading: isCreateSubmitting }] = useCreateSpaceMutation();
 

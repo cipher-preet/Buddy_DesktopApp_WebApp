@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { FiArrowUp, FiGrid, FiMic, FiMoreHorizontal, FiPlus, FiStar } from 'react-icons/fi';
+import { FiArrowUp, FiGrid, FiMoreVertical, FiStar, FiTrash2 } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
 import { useToast } from '@/app/ToastProvider';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import { getApiErrorMessage } from '@/services/apiErrors';
 import {
   useCreateGoalMutation,
@@ -39,6 +41,8 @@ const GoalCard = ({
 }) => {
   const { showToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteGoal, deleteState] = useDeleteGoalMutation();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -61,12 +65,15 @@ const GoalCard = ({
   }, [menuOpen]);
 
   const handleDelete = async () => {
+    if (deleteState.isLoading) return;
+    setDeleteError(null);
     try {
       await deleteGoal(goal.id).unwrap();
       showToast({ type: 'success', message: 'Goal deleted.' });
+      setConfirmOpen(false);
       onDeleted(goal.id);
     } catch (error) {
-      showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to delete this goal.') });
+      setDeleteError(getApiErrorMessage(error, 'Unable to delete this goal.'));
     }
   };
 
@@ -84,7 +91,7 @@ const GoalCard = ({
             setMenuOpen((open) => !open);
           }}
         >
-          <FiMoreHorizontal size={18} strokeWidth={2} aria-hidden="true" />
+          <FiMoreVertical size={18} strokeWidth={2} aria-hidden="true" />
         </button>
         {menuOpen ? (
           <div className="achieve-goal-goal-card__popover" role="menu">
@@ -92,13 +99,14 @@ const GoalCard = ({
               type="button"
               role="menuitem"
               className="achieve-goal-goal-card__delete"
-              disabled={deleteState.isLoading}
               onClick={(event) => {
                 event.stopPropagation();
-                void handleDelete();
+                setMenuOpen(false);
+                setDeleteError(null);
+                setConfirmOpen(true);
               }}
             >
-              {deleteState.isLoading ? 'Deleting…' : 'Delete goal'}
+              Delete goal
             </button>
           </div>
         ) : null}
@@ -113,6 +121,30 @@ const GoalCard = ({
         <strong>{goal.title}</strong>
         <p>{goal.description}</p>
       </button>
+
+      {confirmOpen ? (
+        <ConfirmDialog
+          tone="danger"
+          icon={<FiTrash2 size={20} />}
+          title="Delete this goal?"
+          description={
+            <>
+              <strong>{goal.title || 'Untitled goal'}</strong> will be permanently deleted, including its plan,
+              steps, and progress. This cannot be undone.
+            </>
+          }
+          confirmLabel="Delete goal"
+          pendingLabel="Deleting…"
+          isPending={deleteState.isLoading}
+          error={deleteError}
+          onCancel={() => {
+            if (deleteState.isLoading) return;
+            setConfirmOpen(false);
+            setDeleteError(null);
+          }}
+          onConfirm={handleDelete}
+        />
+      ) : null}
     </article>
   );
 };
@@ -140,6 +172,7 @@ export const AchieveGoalPage = () => {
   const [composerError, setComposerError] = useState('');
   const appliedRouteGoal = useRef(false);
   const routeGoalId = useRef(readGoalId());
+  const { handleApiError } = usePlanGate();
 
   const goalsQuery = useGetGoalsQuery();
   const routeGoal = useGetGoalQuery(routeGoalId.current ?? '', { skip: !routeGoalId.current });
@@ -179,6 +212,9 @@ export const AchieveGoalPage = () => {
       setPrompt('');
       openGoal(result.goal.id, result.goal.status);
     } catch (error) {
+      if (handleApiError(error, 'Unable to start this goal.')) {
+        return;
+      }
       setComposerError(getApiErrorMessage(error, 'Unable to start this goal.'));
     }
   };
@@ -223,13 +259,7 @@ export const AchieveGoalPage = () => {
             />
 
             <div className="achieve-goal-composer__toolbar">
-              <button type="button" className="achieve-goal-icon-btn" aria-label="Add attachment">
-                <FiPlus size={18} strokeWidth={2} aria-hidden="true" />
-              </button>
               <div className="achieve-goal-composer__toolbar-right">
-                <button type="button" className="achieve-goal-icon-btn" aria-label="Voice input">
-                  <FiMic size={17} strokeWidth={2} aria-hidden="true" />
-                </button>
                 <button
                   type="button"
                   className="achieve-goal-submit"

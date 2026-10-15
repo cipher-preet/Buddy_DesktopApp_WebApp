@@ -3,10 +3,9 @@ import { createPortal } from 'react-dom';
 
 import { BrandLogo } from '@/components/common/BrandLogo';
 
-type GetAgentModalProps = {
+type HireAgentModalProps = {
   agentName: string;
   onClose: () => void;
-  onStartTrial: () => void;
 };
 
 const AgentsArtwork = () => (
@@ -47,7 +46,7 @@ const AgentsArtwork = () => (
   </svg>
 );
 
-export const GetAgentModal = ({ agentName, onClose, onStartTrial }: GetAgentModalProps) => {
+export const HireAgentModal = ({ agentName, onClose }: HireAgentModalProps) => {
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -104,12 +103,15 @@ export const GetAgentModal = ({ agentName, onClose, onStartTrial }: GetAgentModa
             </p>
           </div>
           <div className="get-agent-modal__actions">
-            <button type="button" className="get-agent-modal__primary" onClick={onStartTrial}>
+            <button type="button" className="get-agent-modal__primary" disabled>
               Try Agents free for 14 days
             </button>
             <button type="button" className="get-agent-modal__ghost" onClick={onClose}>
               Maybe later
             </button>
+            <p className="get-agent-modal__coming-soon" role="status">
+              Coming soon
+            </p>
           </div>
         </div>
         <div className="get-agent-modal__art" aria-hidden="true">

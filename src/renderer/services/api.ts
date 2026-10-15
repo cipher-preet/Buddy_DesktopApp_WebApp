@@ -218,6 +218,7 @@ export const api = createApi({
     'Notifications',
     'MindmapList',
     'DocumentTemplates',
+    'MarketplaceAgents',
     'SpaceDocuments',
     'Goals',
   ],
@@ -296,6 +297,16 @@ export const api = createApi({
         unwrapAuthData(response, 'Unable to update profile'),
       invalidatesTags: ['Auth', 'Profile'],
     }),
+    updateAvatar: builder.mutation<UpdateProfileResponse, FormData>({
+      query: (body) => ({
+        url: 'auth/me/avatar',
+        method: 'PATCH',
+        body,
+      }),
+      transformResponse: (response: AuthApiEnvelope<UpdateProfileResponse>) =>
+        unwrapAuthData(response, 'Unable to update profile photo'),
+      invalidatesTags: ['Auth', 'Profile'],
+    }),
     logout: builder.mutation<LogoutData, void>({
       query: () => ({
         url: 'auth/logout',
@@ -346,6 +357,7 @@ export const {
   useGoogleDesktopExchangeMutation,
   useLazyCheckAuthQuery,
   useUpdateProfileMutation,
+  useUpdateAvatarMutation,
   useLogoutMutation,
   useDeleteAccountMutation,
   useRaiseSupportTicketMutation,
