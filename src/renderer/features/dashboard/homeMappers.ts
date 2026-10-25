@@ -262,22 +262,21 @@ export const mapTask = (task: ApiTaskCard): WorkspaceTask => {
   };
 };
 
-// Must match the backend's NOTE_PREVIEW_LENGTH for getStagedNotesBySpace.
-const NOTE_PREVIEW_LENGTH = 140;
+// Older list payloads omitted `body` and sent only a 140-character preview.
+const LEGACY_NOTE_PREVIEW_LENGTH = 140;
 
 export const mapNote = (note: ApiNoteCard): WorkspaceNote => {
   const body = note.body?.trim() || '';
   const preview = note.bodyPreview?.trim() || '';
   const stamp = note.updatedAt || note.createdAt;
   const dateGroup = toDateGroupMeta(stamp);
-  // List payloads ship bodyPreview only; full body arrives on get-by-id / edit.
-  const excerpt = preview || body;
+  const excerpt = body || preview;
 
   return {
     id: String(note.id),
     title: note.title || 'Untitled note',
     excerpt,
-    isTruncated: !body && preview.length >= NOTE_PREVIEW_LENGTH,
+    isTruncated: !body && preview.length >= LEGACY_NOTE_PREVIEW_LENGTH,
     dateLabel: formatNoteDate(stamp),
     dateGroupKey: dateGroup.dateGroupKey,
     dateGroupLabel: dateGroup.dateGroupLabel,

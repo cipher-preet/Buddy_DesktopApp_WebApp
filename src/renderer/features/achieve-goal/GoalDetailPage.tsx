@@ -1,1065 +1,1245 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  FiAlertCircle,
   FiArrowRight,
-  FiAtSign,
-  FiBox,
+  FiArrowUpRight,
+  FiAward,
+  FiCalendar,
+  FiCheck,
+  FiCheckCircle,
+  FiChevronDown,
   FiChevronRight,
-  FiLink2,
+  FiCircle,
+  FiClock,
+  FiFlag,
+  FiLayers,
+  FiList,
+  FiMinus,
+  FiPlus,
+  FiRefreshCw,
+  FiSettings,
+  FiShare2,
+  FiTarget,
+  FiTrendingUp,
+  FiX,
+  FiZap,
 } from 'react-icons/fi';
-import type { IconType } from 'react-icons';
-import { IoDiamondOutline } from 'react-icons/io5';
 
 import { useToast } from '@/app/ToastProvider';
 import { getApiErrorMessage } from '@/services/apiErrors';
 import {
-  useApproveGoalRevisionMutation,
+  useCheckInGoalMutation,
   useGetGoalDashboardQuery,
+  useGoalWorkspaceActionMutation,
+  usePauseGoalMutation,
+  useToggleGoalPlanItemMutation,
   type GoalDashboard,
+  type GoalWorkspace,
+  type GoalWorkspaceStep,
 } from '@/services/goalsApi';
 
-import { GoalRecDrawer, type GoalRecDetail } from './GoalRecDrawer';
-import { GoalStepDrawer, type GoalStepDetail } from './GoalStepDrawer';
-import { GoalStrategyDrawer, type GoalStrategyDetail } from './GoalStrategyDrawer';
-import './goal-detail.css';
-
-const STEPS_PER_PAGE = 6;
-
-const shortLabel = (value: string | undefined, max = 42) => {
-  const text = (value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
-};
+import './goal-workspace.css';
 
 type GoalDetailPageProps = {
   goalId: string;
   onBack: () => void;
 };
 
-type GoalRecListItem = GoalRecDetail & {
-  before: string;
-  after: string;
-  linkLabel: string;
-  icon: IconType;
+type Dialog =
+  | { kind: 'step'; id: string; celebrate?: boolean }
+  | { kind: 'reschedule'; id: string }
+  | { kind: 'strategy'; id: string }
+  | { kind: 'recommendation'; id: string }
+  | { kind: 'log' }
+  | { kind: 'shortcuts' }
+  | { kind: 'recovery' }
+  | { kind: 'command' }
+  | null;
+
+const fillChecklist = (step: GoalWorkspaceStep, data: GoalDashboard): GoalWorkspaceStep => {
+  if (step.checklist.length > 0) return step;
+  const day = (data.days ?? []).find((item) => item.id === step.id || item.dayIndex === step.dayIndex || item.title === step.title);
+  const tasks = day?.tasks ?? [];
+  if (!tasks.length) return step;
+  const checklist = tasks.map((task, index) => ({
+    id: task.id || `${step.id}-t-${index + 1}`,
+    text: task.text,
+    done: Boolean(task.done),
+    why: task.why,
+    definitionOfDone: task.definitionOfDone,
+  }));
+  return {
+    ...step,
+    checklist,
+    checklistDone: checklist.filter((item) => item.done).length,
+    checklistTotal: checklist.length,
+    why: step.why || day?.focus || checklist.find((item) => item.why)?.why || '',
+    outcome: step.outcome || day?.definitionOfDone || checklist.find((item) => item.definitionOfDone)?.definitionOfDone || '',
+    doneWhen: step.doneWhen || day?.definitionOfDone || checklist.map((item) => item.definitionOfDone).filter(Boolean).join(' '),
+  };
 };
 
-type Point = { x: number; y: number };
+const hydrateWorkspace = (workspace: GoalWorkspace, data: GoalDashboard): GoalWorkspace => ({
+  ...workspace,
+  todayStep: workspace.todayStep ? fillChecklist(workspace.todayStep, data) : null,
+  attention: workspace.attention.map((step) => fillChecklist(step, data)),
+  weeks: workspace.weeks.map((week) => ({
+    ...week,
+    steps: week.steps.map((step) => fillChecklist(step, data)),
+  })),
+});
 
-type GoalChartPoint = {
-  id: string;
-  label: string;
-  year: string;
-  quarter: string;
-  real: number | null;
-  targeted: number;
-};
+const modLabel = () => (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl');
 
-const REC_ICONS = [FiAtSign, FiBox, FiLink2, IoDiamondOutline] as IconType[];
-
-const formatPercent = (value: number) => `${Math.round(value)}%`;
-
-const smoothPath = (points: Point[]) => {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-
-  let path = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previous = points[index - 1] ?? points[index];
-    const current = points[index];
-    const next = points[index + 1];
-    const after = points[index + 2] ?? next;
-    const cp1x = current.x + (next.x - previous.x) / 6;
-    const cp1y = current.y + (next.y - previous.y) / 6;
-    const cp2x = next.x - (after.x - current.x) / 6;
-    const cp2y = next.y - (after.y - current.y) / 6;
-    path += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${next.x.toFixed(2)} ${next.y.toFixed(2)}`;
-  }
-  return path;
-};
-
-const ReductionChart = ({ points, years }: { points: GoalChartPoint[]; years: string[] }) => {
-  const gradientId = useId().replace(/:/g, '');
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [size, setSize] = useState({ width: 760, height: 380 });
-
-  useEffect(() => {
-    const node = wrapRef.current;
-    const canvas = node?.querySelector<HTMLElement>('.gd-chart__canvas');
-    if (!node || !canvas) return undefined;
-
-    const update = () => {
-      // Height comes from CSS (--gd-chart-height), same breakpoint treatment as Recommendations.
-      const width = Math.max(240, Math.round(canvas.clientWidth));
-      const height = Math.max(160, Math.round(canvas.clientHeight));
-      setSize((current) =>
-        current.width === width && current.height === height ? current : { width, height },
-      );
+const deriveWorkspace = (data: GoalDashboard): GoalWorkspace => {
+  if (data.workspace) return data.workspace;
+  const today = new Date().toISOString().slice(0, 10);
+  const days = data.days ?? [];
+  const steps: GoalWorkspaceStep[] = days.map((day, index) => {
+    const tasks = day.tasks ?? [];
+    const done = day.status === 'done' || (tasks.length > 0 && tasks.every((task) => task.done) && day.status !== 'reopened');
+    const skipped = day.status === 'skipped';
+    return {
+      id: day.id || `day-${day.dayIndex || index + 1}`,
+      dayIndex: day.dayIndex || index + 1,
+      date: day.scheduledDate || today,
+      dateLabel: day.dateLabel || `Day ${day.dayIndex || index + 1}`,
+      title: day.title,
+      category: day.category || day.focus || 'Step',
+      minutes: day.minutes || (day.hours ? Math.round(day.hours * 60) : 45),
+      status: skipped ? 'skipped' : done ? 'done' : 'open',
+      checklist: tasks.map((task, taskIndex) => ({
+        id: task.id,
+        text: task.text,
+        done: Boolean(task.done),
+        why: task.why,
+        definitionOfDone: task.definitionOfDone,
+      })),
+      checklistDone: tasks.filter((task) => task.done).length,
+      checklistTotal: tasks.length,
+      why: day.focus || '',
+      outcome: day.definitionOfDone || '',
+      doneWhen: day.definitionOfDone || '',
+      notes: day.notes || '',
+      partOf: day.category || 'Plan',
+      overdueDays: 0,
+      example: false,
     };
+  });
+  const doneCount = steps.filter((step) => step.status === 'done').length;
+  return {
+    title: data.title,
+    status: data.status,
+    startedOn: today,
+    startedLabel: 'TODAY',
+    endsOn: today,
+    endsLabel: data.deadlineLabel || data.timeframe || '',
+    dayNumber: 1,
+    horizonDays: Math.max(steps.length, 1),
+    stepsDone: doneCount,
+    stepsTotal: steps.length,
+    daysLeft: Math.max(steps.length - doneCount, 0),
+    progressPercent: steps.length ? Math.round((doneCount / steps.length) * 100) : 0,
+    pace: data.healthStatus === 'AT_RISK' ? 'at_risk' : data.status === 'COMPLETED' ? 'achieved' : 'on_track',
+    paceLabel: data.status === 'COMPLETED' ? 'Goal achieved' : 'On track to finish',
+    achieved: data.status === 'COMPLETED',
+    finishedEarlyDays: null,
+    today,
+    metric: {
+      label: 'Progress',
+      current: data.outcomeProgress,
+      target: 100,
+      todayTarget: null,
+      lastLogged: data.outcomeProgress,
+      lastLoggedOn: null,
+      lastLoggedLabel: '',
+      streak: 0,
+    },
+    chart: (data.chart.points ?? []).map((point, index) => ({
+      day: index + 1,
+      label: point.label,
+      date: point.label,
+      real: point.actual,
+      target: point.target,
+    })),
+    coach: {
+      status: 'ready',
+      text: data.immediateNextStep || data.recommendation || 'Your coach note will show here.',
+      evidence: (data.evidence ?? []).slice(0, 3).map((item) => ({
+        id: item.id,
+        label: item.text,
+        kind: item.sourceType || 'Evidence',
+        dateLabel: '',
+      })),
+    },
+    todayStep: steps.find((step) => step.status !== 'done' && step.status !== 'skipped') ?? null,
+    attention: [],
+    weeks: steps.length
+      ? [{ id: 'week-1', label: 'Week 1', rangeLabel: data.timeframe || 'This plan', flag: '', done: doneCount, total: steps.length, expanded: true, steps }]
+      : [],
+    strategies: (data.strategies ?? []).map((strategy, index) => ({
+      id: strategy.id || `strategy-${index + 1}`,
+      title: strategy.title,
+      body: strategy.body,
+      overview: strategy.why || strategy.body,
+      done: 0,
+      total: strategy.proofPoints?.length || 0,
+      percent: 0,
+      active: true,
+      windowLabel: strategy.effort || data.timeframe || '',
+      linkedSteps: [],
+    })),
+    recommendations: (data.recommendations ?? []).map((item) => ({
+      id: item.id,
+      title: item.title,
+      reason: item.reason,
+      windowLabel: item.measurableGoal || '',
+      howSteps: item.howSteps ?? [],
+      category: item.milestoneTitle || 'Plan',
+      added: false,
+      related: [],
+    })),
+    checkIn: null,
+    recovery: null,
+  };
+};
 
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, []);
+const Ring = ({ value, tone }: { value: number; tone: 'blue' | 'green' }) => {
+  const radius = 28;
+  const length = 2 * Math.PI * radius;
+  const dash = (Math.max(0, Math.min(100, value)) / 100) * length;
+  const color = tone === 'green' ? '#16a34a' : '#2f6bff';
+  return (
+    <svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <circle cx="36" cy="36" r={radius} fill="none" stroke="#eceef3" strokeWidth="6" />
+      <circle
+        cx="36"
+        cy="36"
+        r={radius}
+        fill="none"
+        stroke={color}
+        strokeWidth="6"
+        strokeLinecap="round"
+        strokeDasharray={`${dash} ${length - dash}`}
+        transform="rotate(-90 36 36)"
+      />
+      <text x="36" y="40" textAnchor="middle" fontSize="13" fontWeight="700" fill="#1c1f26">
+        {Math.round(value)}%
+      </text>
+    </svg>
+  );
+};
 
-  const width = size.width;
-  const height = size.height;
-  const pad = { top: 18, right: 16, bottom: 34, left: 36 };
-  const plotW = Math.max(width - pad.left - pad.right, 1);
-  const plotH = Math.max(height - pad.top - pad.bottom, 1);
-  const maxY = 100;
-  const span = Math.max(points.length - 1, 1);
+const PaceChart = ({ points }: { points: GoalWorkspace['chart'] }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const usable = points.filter((point) => point.target != null || point.real != null);
+  const shown = usable.length ? usable : points;
+  const max = Math.max(1, ...shown.map((point) => Math.max(point.target ?? 0, point.real ?? 0)));
+  const width = 300;
+  const height = 140;
+  const pad = { l: 8, r: 8, t: 16, b: 22 };
+  const plotW = width - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+  const xOf = (index: number) => pad.l + (shown.length <= 1 ? plotW / 2 : (index / (shown.length - 1)) * plotW);
+  const yOf = (value: number) => pad.t + plotH - (value / max) * plotH;
+  const line = (key: 'real' | 'target') =>
+    shown
+      .map((point, index) => (point[key] == null ? null : `${index === 0 ? 'M' : 'L'} ${xOf(index)} ${yOf(point[key] as number)}`))
+      .filter(Boolean)
+      .join(' ');
+  const targetLine = line('target');
+  const realPoints = shown.map((point, index) => (point.real == null ? null : { x: xOf(index), y: yOf(point.real) })).filter((point): point is { x: number; y: number } => point != null);
+  const realLine = realPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+  const area = realPoints.length
+    ? `${realLine} L ${realPoints[realPoints.length - 1].x} ${pad.t + plotH} L ${realPoints[0].x} ${pad.t + plotH} Z`
+    : '';
+  const active = hover != null ? shown[hover] : shown.filter((point) => point.real != null).at(-1);
+  const activeIndex = active ? shown.indexOf(active) : -1;
+  return (
+    <div className="gw-chart">
+      <div className="gw-legend">
+        <span><i className="is-real" /> Real</span>
+        <span><i className="is-target" /> Target</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        onMouseMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const x = ((event.clientX - rect.left) / rect.width) * width;
+          const index = Math.round(((x - pad.l) / plotW) * Math.max(shown.length - 1, 1));
+          setHover(Math.max(0, Math.min(shown.length - 1, index)));
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        <path d={area} fill="#dbe7ff" opacity="0.7" />
+        <path d={targetLine} fill="none" stroke="#b7c0d0" strokeDasharray="4 4" strokeWidth="1.5" />
+        <path d={realLine} fill="none" stroke="#2f6bff" strokeWidth="2" />
+        {activeIndex >= 0 && shown[activeIndex].real != null ? (
+          <circle cx={xOf(activeIndex)} cy={yOf(shown[activeIndex].real as number)} r="4" fill="#2f6bff" />
+        ) : null}
+      </svg>
+      {active ? (
+        <div className="gw-tip" style={{ left: `${shown.length <= 1 ? 50 : (activeIndex / Math.max(shown.length - 1, 1)) * 100}%` }}>
+          {active.label} · {active.real ?? '—'} real{active.target != null ? ` · ${active.target} target` : ''}
+        </div>
+      ) : null}
+      <div className="gw-chart-foot" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span>{shown[0]?.label || 'Day 1'}</span>
+        <span>{shown[Math.floor(shown.length / 2)]?.label || ''}</span>
+        <span>{shown[shown.length - 1]?.label || ''}</span>
+      </div>
+    </div>
+  );
+};
 
-  const toPoint = (value: number, index: number): Point => ({
-    x: pad.left + (index / span) * plotW,
-    y: pad.top + plotH - (value / maxY) * plotH,
+export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
+  const { showToast } = useToast();
+  const dashboard = useGetGoalDashboardQuery(goalId);
+  const [act, actState] = useGoalWorkspaceActionMutation();
+  const [toggleItem] = useToggleGoalPlanItemMutation();
+  const [checkIn] = useCheckInGoalMutation();
+  const [pauseGoal, pauseState] = usePauseGoalMutation();
+  const workspace = useMemo(
+    () => (dashboard.data ? hydrateWorkspace(deriveWorkspace(dashboard.data), dashboard.data) : null),
+    [dashboard.data],
+  );
+  const [filter, setFilter] = useState<'all' | 'open' | 'done'>('all');
+  const [closedWeeks, setClosedWeeks] = useState<Record<string, boolean>>({});
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gearOpen, setGearOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [logValue, setLogValue] = useState(0);
+  const [rescheduleMode, setRescheduleMode] = useState<'move' | 'skip' | 'split'>('move');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [reflection, setReflection] = useState('');
+  const [pickedAdjustments, setPickedAdjustments] = useState<string[]>([]);
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ message: string; value: number } | null>(null);
+  const mod = modLabel();
+
+  const steps = useMemo(() => workspace?.weeks.flatMap((week) => week.steps) ?? [], [workspace]);
+  const visibleSteps = steps.filter((step) => {
+    if (filter === 'done') return step.status === 'done';
+    if (filter === 'open') return step.status !== 'done' && step.status !== 'skipped';
+    return true;
   });
 
-  const targetPoints = points.map((point, index) => toPoint(point.targeted, index));
-  const realPoints = points
-    .map((point, index) => (point.real == null ? null : toPoint(point.real, index)))
-    .filter((point): point is Point => point != null);
-  const targetPath = smoothPath(targetPoints);
-  const realPath = smoothPath(realPoints);
-  const baseline = pad.top + plotH;
-  const areaPath =
-    targetPoints.length > 0
-      ? `${targetPath} L ${targetPoints[targetPoints.length - 1].x.toFixed(2)} ${baseline} L ${targetPoints[0].x.toFixed(2)} ${baseline} Z`
-      : '';
-  const lastReal = realPoints[realPoints.length - 1];
-  const hover = hoverIndex != null ? points[hoverIndex] : null;
-  const hoverX = hoverIndex != null ? pad.left + (hoverIndex / span) * plotW : lastReal?.x ?? 0;
-  const yTicks = [0, 25, 50, 75, 100];
+  useEffect(() => {
+    if (!workspace) return;
+    setLogValue(workspace.metric.current ?? workspace.metric.lastLogged ?? 0);
+    setReflection(workspace.checkIn?.reflection || '');
+    setPickedAdjustments((workspace.checkIn?.adjustments ?? []).filter((item) => item.selected).map((item) => item.id));
+  }, [workspace]);
 
-  const readIndex = (clientX: number, currentTarget: Element) => {
-    const rect = currentTarget.getBoundingClientRect();
-    const x = ((clientX - rect.left) / Math.max(rect.width, 1)) * width;
-    return Math.max(0, Math.min(points.length - 1, Math.round(((x - pad.left) / plotW) * span)));
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (typing) return;
+      if (event.key === 'Escape') {
+        setDialog(null);
+        setCheckInOpen(false);
+        return;
+      }
+      if (event.key === '?' || (event.shiftKey && event.key === '/')) {
+        setDialog({ kind: 'shortcuts' });
+        return;
+      }
+      if (!visibleSteps.length) return;
+      const index = Math.max(0, visibleSteps.findIndex((step) => step.id === selectedId));
+      if (event.key.toLowerCase() === 'a') setFilter('all');
+      else if (event.key.toLowerCase() === 'o') setFilter('open');
+      else if (event.key.toLowerCase() === 'd') setFilter('done');
+      else if (event.key === 'j' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSelectedId(visibleSteps[Math.min(visibleSteps.length - 1, index + 1)].id);
+      } else if (event.key === 'k' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSelectedId(visibleSteps[Math.max(0, index - 1)].id);
+      } else if (event.key === 'Enter' && selectedId) {
+        setDialog({ kind: 'step', id: selectedId });
+      } else if (event.key.toLowerCase() === 'x' && selectedId) {
+        void run({ action: 'complete', stepId: selectedId });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId, visibleSteps]);
+
+  const run = async (body: {
+    action: 'complete' | 'reopen' | 'note' | 'reschedule' | 'apply_recommendation' | 'apply_checkin';
+    stepId?: string;
+    date?: string;
+    note?: string;
+    mode?: string;
+    recommendationId?: string;
+    adjustmentIds?: string[];
+    reflection?: string;
+  }) => {
+    try {
+      await act({ goalId, ...body }).unwrap();
+      return true;
+    } catch (error) {
+      showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to update this goal.') });
+      return false;
+    }
+  };
+
+  if (dashboard.isLoading && !workspace) {
+    return <section className="gw-page" aria-busy="true"><p style={{ padding: 28 }}>Loading this goal…</p></section>;
+  }
+  if (dashboard.isError && !workspace) {
+    return (
+      <section className="gw-page">
+        <p style={{ padding: 28 }}>{getApiErrorMessage(dashboard.error, 'Unable to load this goal.')}</p>
+        <button type="button" className="gw-btn" onClick={() => void dashboard.refetch()}>Retry</button>
+      </section>
+    );
+  }
+  if (!workspace) return null;
+
+  const stepById = (id: string | undefined) => steps.find((step) => step.id === id) ?? null;
+  const openStep = workspace.todayStep;
+  const achieved = workspace.achieved || workspace.pace === 'achieved';
+
+  const saveLog = async () => {
+    const previous = workspace.metric.current ?? workspace.metric.lastLogged ?? 0;
+    try {
+      await checkIn({ goalId, value: logValue }).unwrap();
+      setDialog(null);
+      setUndo({ message: `${workspace.metric.label} updated to ${logValue}`, value: previous });
+    } catch (error) {
+      showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to log that number.') });
+    }
   };
 
   return (
-    <div className="gd-chart" ref={wrapRef}>
-      <div className="gd-chart__legend">
-        <span>
-          <i className="gd-chart__key gd-chart__key--real" />
-          Real
-        </span>
-        <span>
-          <i className="gd-chart__key gd-chart__key--target" />
-          Targeted
-        </span>
-        <small className="gd-chart__live">Live</small>
-      </div>
-      <div className="gd-chart__canvas">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          width="100%"
-          height="100%"
-          preserveAspectRatio="none"
-          role="img"
-          aria-label="Real reduction versus targeted reduction"
-          onMouseMove={(event) => setHoverIndex(readIndex(event.clientX, event.currentTarget))}
-          onMouseLeave={() => setHoverIndex(null)}
-        >
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#9ebcf2" stopOpacity="0.55" />
-            <stop offset="58%" stopColor="#d7e6fb" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-          </linearGradient>
-        </defs>
+    <section className="gw-page" aria-label={`${workspace.title} goal`}>
+      <header className="gw-top">
+        <nav className="gw-crumbs" aria-label="Breadcrumb">
+          <button type="button" onClick={onBack}>Goals</button>
+          <FiChevronRight size={14} aria-hidden="true" />
+          <strong>{checkInOpen ? 'Weekly check-in' : workspace.title}</strong>
+        </nav>
+        {checkInOpen ? (
+          <div className="gw-top-actions">
+            <button type="button" className="gw-btn" onClick={() => setCheckInOpen(false)}>Back to goal</button>
+            <button
+              type="button"
+              className="gw-btn gw-btn--primary"
+              disabled={actState.isLoading}
+              onClick={() => {
+                void run({ action: 'apply_checkin', adjustmentIds: pickedAdjustments, reflection }).then((ok) => {
+                  if (ok) {
+                    showToast({ type: 'success', message: `Applied ${pickedAdjustments.length} change${pickedAdjustments.length === 1 ? '' : 's'}.` });
+                    setCheckInOpen(false);
+                  }
+                });
+              }}
+            >
+              Apply {pickedAdjustments.length} change{pickedAdjustments.length === 1 ? '' : 's'}
+            </button>
+          </div>
+        ) : (
+          <div className="gw-top-actions">
+              <div className="gw-gear">
+                <button type="button" className="gw-btn gw-icon-btn" aria-label="Goal settings" onClick={() => setGearOpen((open) => !open)}>
+                  <FiSettings size={16} />
+                </button>
+                {gearOpen ? (
+                  <div className="gw-menu">
+                    <button
+                      type="button"
+                      disabled={pauseState.isLoading}
+                      onClick={() => {
+                        setGearOpen(false);
+                        void pauseGoal(goalId).unwrap().then(() => showToast({ type: 'success', message: workspace.status === 'PAUSED' ? 'Goal resumed.' : 'Goal paused.' })).catch((error) => {
+                          showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to update this goal.') });
+                        });
+                      }}
+                    >
+                      {workspace.status === 'PAUSED' ? 'Resume goal' : 'Pause goal'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+          </div>
+        )}
+      </header>
 
-        {yTicks.map((tick) => {
-          const y = pad.top + plotH - (tick / maxY) * plotH;
-          return (
-            <g key={tick}>
-              <line x1={pad.left} y1={y} x2={pad.left + plotW} y2={y} className="gd-chart__grid gd-chart__grid--h" />
-              <text x={pad.left - 8} y={y + 4} textAnchor="end" className="gd-chart__axis gd-chart__axis--y">
-                {tick}
-              </text>
-            </g>
-          );
-        })}
-
-        {years.map((year) => {
-          const index = points.findIndex((point) => point.year === year && point.quarter === 'Q1');
-          const x = pad.left + (Math.max(index, 0) / span) * plotW;
-          return (
-            <g key={year}>
-              <line x1={x} y1={pad.top} x2={x} y2={baseline} className="gd-chart__grid" />
-              <text x={x} y={height - 8} textAnchor={year === years[0] ? 'start' : 'middle'} className="gd-chart__axis">
-                {year}
-              </text>
-            </g>
-          );
-        })}
-
-        <path d={areaPath} fill={`url(#${gradientId})`} />
-        <path d={targetPath} className="gd-chart__line gd-chart__line--target" pathLength={1} />
-        <path d={realPath} className="gd-chart__line gd-chart__line--real" pathLength={1} />
-
-        {hover && hover.real != null ? (
-          <circle cx={toPoint(hover.real, hoverIndex ?? 0).x} cy={toPoint(hover.real, hoverIndex ?? 0).y} r="4.5" className="gd-chart__dot" />
-        ) : null}
-        {hover ? (
-          <circle
-            cx={toPoint(hover.targeted, hoverIndex ?? 0).x}
-            cy={toPoint(hover.targeted, hoverIndex ?? 0).y}
-            r="4.5"
-            className="gd-chart__dot gd-chart__dot--target"
+      <div className="gw-scroll">
+        {checkInOpen ? (
+          <CheckInView
+            workspace={workspace}
+            reflection={reflection}
+            onReflection={setReflection}
+            picked={pickedAdjustments}
+            onToggle={(id) => setPickedAdjustments((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
           />
-        ) : null}
+        ) : (
+          <div className="gw-layout">
+            <div>
+              <p className="gw-kicker">GOAL · STARTED {workspace.startedLabel} · {workspace.stepsDone} OF {workspace.stepsTotal} STEPS</p>
+              <h1 className="gw-title">{workspace.title}</h1>
 
-        {lastReal ? (
-          <g>
-            <line x1={lastReal.x} y1={lastReal.y + 8} x2={lastReal.x} y2={baseline} className="gd-chart__guide" />
-            <circle cx={lastReal.x} cy={lastReal.y} r="8" className="gd-chart__halo" />
-            <circle cx={lastReal.x} cy={lastReal.y} r="4.2" className="gd-chart__dot gd-chart__dot--live" />
-          </g>
-        ) : null}
+              {achieved ? (
+                <div className="gw-achieved">
+                  <div className="gw-confetti" aria-hidden="true">
+                    {['#2f6bff', '#16a34a', '#e25b2a', '#8b5cf6', '#f5b942'].map((color, index) => (
+                      <i key={color} style={{ left: `${12 + index * 16}%`, background: color, transform: `rotate(${index * 18}deg)` }} />
+                    ))}
+                  </div>
+                  <div className="gw-trophy" aria-hidden="true"><FiAward size={26} strokeWidth={1.75} /></div>
+                  <h2>Goal achieved</h2>
+                  <p>{workspace.stepsDone} of {workspace.stepsTotal} steps done{workspace.finishedEarlyDays ? ` · finished ${workspace.finishedEarlyDays} days early` : ''}.</p>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button
+                      type="button"
+                      className="gw-btn"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(`${workspace.title}\n${workspace.stepsDone}/${workspace.stepsTotal} steps · ${workspace.metric.current ?? '—'}/${workspace.metric.target ?? '—'} ${workspace.metric.label}`);
+                        showToast({ type: 'success', message: 'Recap copied.' });
+                      }}
+                    >
+                      <FiShare2 size={15} aria-hidden="true" /> Share recap
+                    </button>
+                    <button type="button" className="gw-btn gw-btn--primary" onClick={onBack}>
+                      Set your next goal <FiArrowRight size={15} aria-hidden="true" />
+                    </button>
+                  </div>
+                  {workspace.coach.text ? <p className="gw-coach" style={{ justifyContent: 'center' }}>{workspace.coach.text}</p> : null}
+                </div>
+              ) : openStep ? (
+                <article className="gw-today">
+                  <div className="gw-today__row">
+                    <div className="gw-daybadge">{openStep.dayIndex}</div>
+                    <div className="gw-today__main">
+                      <p className="gw-today__label">TODAY’S STEP · DAY {openStep.dayIndex}</p>
+                      <h2>
+                        {openStep.title}
+                        {openStep.example ? <span className="gw-chip">example</span> : null}
+                      </h2>
+                      <div className="gw-meta">
+                        <span><FiLayers size={13} aria-hidden="true" />{openStep.category}</span>
+                        <span><FiClock size={13} aria-hidden="true" />~{openStep.minutes} min</span>
+                        <span><FiList size={13} aria-hidden="true" />{openStep.checklistDone}/{openStep.checklistTotal || 0} done</span>
+                      </div>
+                    </div>
+                    <div className="gw-today__actions">
+                      <button type="button" className="gw-btn gw-btn--primary" onClick={() => { setNoteDraft(openStep.notes || ''); setDialog({ kind: 'step', id: openStep.id }); }}>
+                        Open step <FiArrowUpRight size={14} aria-hidden="true" />
+                      </button>
+                      <button type="button" className="gw-btn" disabled={actState.isLoading} onClick={() => void run({ action: 'complete', stepId: openStep.id })}>
+                        <FiCheck size={14} aria-hidden="true" /> Mark done
+                      </button>
+                    </div>
+                  </div>
+                  {workspace.coach.status === 'thinking' ? (
+                    <div className="gw-coach" aria-live="polite">
+                      <div style={{ flex: 1 }}>
+                        <p>Coach is reading the latest meetings…</p>
+                        <div className="gw-skeleton" />
+                        <div className="gw-skeleton" />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="gw-coach"><FiZap size={15} aria-hidden="true" /><p>{workspace.coach.text}</p></div>
+                      {workspace.coach.evidence.length ? (
+                        <div className="gw-evidence">
+                          {workspace.coach.evidence.map((item) => (
+                            <span key={item.id || item.label} className="gw-pill">{item.kind}{item.dateLabel ? ` · ${item.dateLabel}` : ''} · {item.label}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </article>
+              ) : (
+                <article className="gw-empty"><h3>No open step</h3><p>Every planned step is done or skipped.</p></article>
+              )}
 
-        {hover ? <line x1={hoverX} y1={pad.top} x2={hoverX} y2={baseline} className="gd-chart__crosshair" /> : null}
-        <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="transparent" />
-        </svg>
+              <div className="gw-timeline-head">
+                <h2>Timeline <span>{workspace.stepsDone}/{workspace.stepsTotal}</span></h2>
+                <div className="gw-filters" role="tablist" aria-label="Filter steps">
+                  {(['all', 'open', 'done'] as const).map((item) => (
+                    <button key={item} type="button" className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)}>
+                      {item[0].toUpperCase() + item.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {filter === 'done' && visibleSteps.length === 0 ? (
+                <div className="gw-empty">
+                  <div className="gw-empty__icon" aria-hidden="true"><FiTarget size={18} /></div>
+                  <h3>No finished steps yet</h3>
+                  <p>Your completed steps will stack up here, week by week.{openStep ? ` Day ${openStep.dayIndex} takes about ${openStep.minutes} minutes.` : ''}</p>
+                  {openStep ? <button type="button" className="gw-btn gw-btn--primary" onClick={() => setDialog({ kind: 'step', id: openStep.id })}>Start Day {openStep.dayIndex}</button> : null}
+                </div>
+              ) : (
+                <>
+                  {workspace.attention.length && filter !== 'done' ? (
+                    <section className="gw-attention">
+                      <div className="gw-attention__head">
+                        <span><FiAlertCircle size={15} aria-hidden="true" /> Needs attention</span>
+                        <button type="button" className="gw-btn" onClick={() => setDialog({ kind: 'recovery' })}>
+                          <FiRefreshCw size={14} aria-hidden="true" /> Reschedule with AI
+                        </button>
+                      </div>
+                      {workspace.attention.map((step) => (
+                        <div key={step.id} className="gw-attention__row">
+                          <button type="button" className="gw-step-open" onClick={() => setDialog({ kind: 'step', id: step.id })}>
+                            <span className="gw-mark is-overdue" />
+                            <span>
+                              <strong>D{step.dayIndex} · {step.title}</strong>
+                              <small style={{ display: 'block', color: '#8b919e' }}>{step.category} · {step.checklistDone}/{step.checklistTotal} checklist</small>
+                            </span>
+                          </button>
+                          <button type="button" className="gw-overdue gw-linkish" onClick={() => { setRescheduleMode('move'); setDialog({ kind: 'reschedule', id: step.id }); }}>
+                            Overdue {step.overdueDays}d
+                          </button>
+                        </div>
+                      ))}
+                    </section>
+                  ) : null}
+                  {workspace.weeks.map((week) => {
+                    const weekSteps = week.steps.filter((step) => visibleSteps.some((item) => item.id === step.id));
+                    if (!weekSteps.length) return null;
+                    const collapsed = closedWeeks[week.id] ?? !week.expanded;
+                    return (
+                      <section key={week.id} className="gw-week">
+                        <button type="button" className="gw-week__head" onClick={() => setClosedWeeks((current) => ({ ...current, [week.id]: !collapsed }))}>
+                          {collapsed ? <FiChevronRight size={16} aria-hidden="true" /> : <FiChevronDown size={16} aria-hidden="true" />}
+                          <strong>{week.label}</strong>
+                          <span>{week.rangeLabel}</span>
+                          {week.flag ? <span className={`gw-flag${week.flag === 'This week' ? ' is-week' : ''}${week.flag === 'Complete' ? ' is-done' : ''}`}>{week.flag}</span> : null}
+                          <span className="gw-week__count">{week.done}/{week.total}</span>
+                        </button>
+                        {collapsed ? null : weekSteps.map((step) => (
+                          <div key={step.id} className={`gw-step${step.id === openStep?.id ? ' is-today' : ''}${step.id === selectedId ? ' is-selected' : ''}`} onMouseLeave={() => setEditingDateId(null)}>
+                            <button type="button" className="gw-step__hit" onClick={() => { setSelectedId(step.id); setNoteDraft(step.notes || ''); setDialog({ kind: 'step', id: step.id }); }}>
+                              <span className={`gw-mark${step.status === 'done' ? ' is-done' : ''}${step.id === openStep?.id ? ' is-today' : ''}${step.status === 'overdue' ? ' is-overdue' : ''}`}>
+                                {step.status === 'done' ? <FiCheck size={11} strokeWidth={3} aria-hidden="true" /> : null}
+                              </span>
+                              <span className="gw-step-copy">
+                                <strong>
+                                  <span>D{step.dayIndex}</span>
+                                  {step.title}
+                                  {step.example ? <span className="gw-chip">example</span> : null}
+                                </strong>
+                                <small>{step.category} · {step.checklistDone}/{step.checklistTotal} checklist</small>
+                              </span>
+                            </button>
+                            {editingDateId === step.id ? (
+                              <form className="gw-date-edit" onSubmit={(event) => {
+                                event.preventDefault();
+                                const date = new FormData(event.currentTarget).get('date');
+                                if (typeof date === 'string') void run({ action: 'reschedule', stepId: step.id, mode: 'move', date });
+                                setEditingDateId(null);
+                              }}>
+                                <input name="date" type="date" defaultValue={step.date} aria-label={`Move ${step.title}`} />
+                                <button type="submit" className="gw-btn" style={{ height: 28 }}>Save</button>
+                              </form>
+                            ) : (
+                              <button type="button" className={`gw-when${step.date === workspace.today ? ' is-today' : ''}`} onClick={() => setEditingDateId(step.id)}>
+                                <FiCalendar size={13} aria-hidden="true" />
+                                {step.date === workspace.today ? 'Today' : step.dateLabel}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </section>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+
+            <aside className="gw-side">
+                <section className="gw-card">
+                  <div className="gw-progress">
+                    <Ring value={workspace.progressPercent} tone={achieved ? 'green' : 'blue'} />
+                    <div>
+                      <strong>{achieved ? 'Goal achieved' : `${workspace.daysLeft} days left`}</strong>
+                      <small>{achieved ? `Ends ${workspace.endsLabel}` : `Ends ${workspace.endsLabel} · ${workspace.paceLabel.toLowerCase()}`}</small>
+                    </div>
+                  </div>
+                  <div className="gw-stats">
+                    <div className="gw-stat"><b>{workspace.stepsDone}/{workspace.stepsTotal}</b><small>Steps</small></div>
+                    <div className="gw-stat"><b>{workspace.metric.current ?? 0}/{workspace.metric.target ?? '—'}</b><small>{workspace.metric.label}*</small></div>
+                    <div className="gw-stat"><b>{workspace.metric.streak}</b><small>Day streak*</small></div>
+                  </div>
+                  <p className="gw-chart-foot" style={{ margin: '10px 0 0' }}>* {workspace.metric.label.toLowerCase()}, streak, chart and dates come from this goal.</p>
+                </section>
+                <section className="gw-card">
+                  <p className="gw-side-label"><FiTrendingUp size={13} aria-hidden="true" /> REAL VS TARGETED</p>
+                  <PaceChart points={workspace.chart} />
+                  <button type="button" className="gw-log" onClick={() => { setLogValue(workspace.metric.current ?? 0); setDialog({ kind: 'log' }); }}>
+                    <FiPlus size={14} aria-hidden="true" /> Log {workspace.metric.label.toLowerCase()} today
+                  </button>
+                </section>
+                <section className="gw-card">
+                  <p className="gw-side-label"><FiLayers size={13} aria-hidden="true" /> STRATEGIES · {workspace.strategies.length}</p>
+                  {workspace.strategies.map((strategy) => (
+                    <button key={strategy.id} type="button" className="gw-strategy" onClick={() => setDialog({ kind: 'strategy', id: strategy.id })}>
+                      <span style={{ flex: 1 }}>
+                        <strong>{strategy.title}</strong>
+                        <div className="gw-bar"><span style={{ width: `${strategy.percent}%` }} /></div>
+                      </span>
+                      <small>{strategy.done}/{strategy.total}</small>
+                    </button>
+                  ))}
+                </section>
+                <section className="gw-card">
+                  <p className="gw-side-label"><FiFlag size={13} aria-hidden="true" /> RECOMMENDATIONS · {workspace.recommendations.length}</p>
+                  {workspace.recommendations.map((item) => (
+                    <button key={item.id} type="button" className="gw-rec" onClick={() => setDialog({ kind: 'recommendation', id: item.id })}>
+                      <span style={{ flex: 1 }}><strong>{item.title}</strong></span>
+                    </button>
+                  ))}
+                </section>
+              </aside>
+          </div>
+        )}
       </div>
 
-      {hover ? (
-        <div
-          className="gd-chart-tip"
-          style={{
-            left: `${Math.min(Math.max((hoverX / width) * 100, 14), 86)}%`,
-          }}
+      {dialog?.kind === 'shortcuts' ? (
+        <Modal title="Keyboard shortcuts" onClose={() => setDialog(null)}>
+          <div className="gw-shortcuts">
+            {[
+              ['Move down / up the timeline', 'J K'],
+              ['Open selected step', '↵'],
+              ['Quick-complete selected', 'X'],
+              ['Next / previous step in modal', 'J K'],
+              ['Tick checklist item', '1–9'],
+              ['Mark step done', `${mod} ↵`],
+              ['Filter All / Open / Done', 'A O D'],
+              ['Close anything', 'Esc'],
+              ['Show this sheet', '?'],
+            ].map(([label, keys]) => (
+              <div key={label}><span>{label}</span><span className="gw-kbd">{keys}</span></div>
+            ))}
+          </div>
+        </Modal>
+      ) : null}
+
+      {dialog?.kind === 'log' ? (
+        <Modal
+          title="Log progress"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button type="button" className="gw-btn" onClick={() => setDialog(null)}>Cancel</button>
+              <button type="button" className="gw-btn gw-btn--primary" onClick={() => void saveLog()}>Save</button>
+            </>
+          }
         >
-          <strong>{hover.label}</strong>
-          <span>
-            <i className="gd-chart__key gd-chart__key--real" />
-            Real {hover.real == null ? '—' : formatPercent(hover.real)}
-          </span>
-          <span>
-            <i className="gd-chart__key gd-chart__key--target" />
-            Targeted {formatPercent(hover.targeted)}
-          </span>
+          <h2>How many {workspace.metric.label.toLowerCase()} today?</h2>
+          <p className="gw-lead">Last logged: {workspace.metric.lastLogged ?? '—'}{workspace.metric.lastLoggedLabel ? ` on ${workspace.metric.lastLoggedLabel}` : ''}. Target today: {workspace.metric.todayTarget ?? '—'}.</p>
+          <div className="gw-stepper">
+            <button type="button" onClick={() => setLogValue((value) => Math.max(0, value - 1))} aria-label="Decrease"><FiMinus size={16} /></button>
+            <strong>{logValue}</strong>
+            <button type="button" onClick={() => setLogValue((value) => value + 1)} aria-label="Increase"><FiPlus size={16} /></button>
+            <span>of {workspace.metric.target ?? '—'} {workspace.metric.label.toLowerCase()}</span>
+          </div>
+          <p className="gw-lead">Updates the real-vs-target chart.</p>
+        </Modal>
+      ) : null}
+
+      {dialog?.kind === 'step' ? (
+        <StepDialog
+          workspace={workspace}
+          step={stepById(dialog.id)}
+          celebrate={Boolean(dialog.celebrate) || (stepById(dialog.id)?.status === 'done' && stepById(dialog.id)?.checklistTotal === stepById(dialog.id)?.checklistDone && (stepById(dialog.id)?.checklistTotal ?? 0) > 0)}
+          note={noteDraft || stepById(dialog.id)?.notes || ''}
+          onNote={setNoteDraft}
+          busy={actState.isLoading}
+          onClose={() => setDialog(null)}
+          onTick={(itemId, done) => {
+            void toggleItem({ goalId, kind: 'day_task', itemId, done }).unwrap().catch((error) => {
+              showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to update that task.') });
+            });
+          }}
+          onDone={() => {
+            const step = stepById(dialog.id);
+            void run({ action: 'complete', stepId: dialog.id }).then((ok) => {
+              if (ok && step) setDialog({ kind: 'step', id: step.id, celebrate: true });
+            });
+          }}
+          onReopen={() => void run({ action: 'reopen', stepId: dialog.id })}
+          onReschedule={stepById(dialog.id)?.status === 'overdue' ? () => { setRescheduleMode('split'); setDialog({ kind: 'reschedule', id: dialog.id }); } : undefined}
+          onSaveNote={() => {
+            const step = stepById(dialog.id);
+            if (!step) return;
+            void run({ action: 'note', stepId: step.id, note: noteDraft || step.notes });
+          }}
+          onNext={() => {
+            const index = steps.findIndex((step) => step.id === dialog.id);
+            const next = steps[index + 1];
+            if (next) setDialog({ kind: 'step', id: next.id });
+          }}
+        />
+      ) : null}
+
+      {dialog?.kind === 'reschedule' ? (
+        <Modal
+          kicker={`Reschedule · Day ${stepById(dialog.id)?.dayIndex ?? ''}`}
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button type="button" className="gw-btn" onClick={() => setDialog(null)}>Cancel</button>
+              <button
+                type="button"
+                className="gw-btn gw-btn--primary"
+                disabled={actState.isLoading}
+                onClick={() => {
+                  void run({ action: 'reschedule', stepId: dialog.id, mode: rescheduleMode, date: rescheduleMode === 'move' ? undefined : undefined }).then((ok) => {
+                    if (ok) setDialog(null);
+                  });
+                }}
+              >
+                {rescheduleMode === 'skip' ? 'Skip it' : rescheduleMode === 'split' ? 'Split step' : 'Move to tomorrow'}
+              </button>
+            </>
+          }
+        >
+          <p className="gw-lead" style={{ color: '#e25b2a' }}>Overdue · was due {stepById(dialog.id)?.dateLabel}</p>
+          <h2>{stepById(dialog.id)?.title}</h2>
+          <p className="gw-lead">Pick what to do with this step. The rest of the plan adjusts.</p>
+          {([
+            ['move', 'Move to tomorrow', 'Your calendar shifts this step to the next day.'],
+            ['skip', 'Skip it', 'Mark as skipped; the plan stays as is.'],
+            ['split', 'Split into 2 steps', 'AI suggests a draft today and the rest two days later.'],
+          ] as const).map(([id, title, detail]) => (
+            <button key={id} type="button" className={`gw-choice${rescheduleMode === id ? ' is-on' : ''}`} onClick={() => setRescheduleMode(id)}>
+              <span><strong>{title}</strong><small>{detail}</small></span>
+            </button>
+          ))}
+        </Modal>
+      ) : null}
+
+      {dialog?.kind === 'recovery' && workspace.recovery ? (
+        <Modal
+          kicker="Recovery plan"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button type="button" className="gw-btn" onClick={() => setDialog(null)}>Not now</button>
+              <button
+                type="button"
+                className="gw-btn gw-btn--primary"
+                disabled={actState.isLoading}
+                onClick={() => {
+                  void run({ action: 'apply_checkin', adjustmentIds: workspace.recovery?.actions.map((item) => item.id) ?? [] }).then((ok) => {
+                    if (ok) {
+                      showToast({ type: 'success', message: 'Recovery plan applied.' });
+                      setDialog(null);
+                    }
+                  });
+                }}
+              >
+                Apply recovery plan
+              </button>
+            </>
+          }
+        >
+          <p className="gw-lead" style={{ color: '#e25b2a' }}>{workspace.recovery.riskLabel}</p>
+          <h2>{workspace.recovery.title}</h2>
+          <p className="gw-lead">{workspace.recovery.summary}</p>
+          {workspace.recovery.actions.map((action) => (
+            <div key={action.id} className="gw-choice">
+              <span><strong>{action.title}</strong>{action.example ? <span className="gw-chip">example</span> : null}<small>{action.detail}</small></span>
+            </div>
+          ))}
+          <p className="gw-lead">{workspace.recovery.projection}</p>
+        </Modal>
+      ) : null}
+
+      {dialog?.kind === 'strategy' ? (
+        <StrategyDialog
+          item={workspace.strategies.find((item) => item.id === dialog.id) ?? null}
+          onClose={() => setDialog(null)}
+          onOpenStep={(id) => setDialog({ kind: 'step', id })}
+        />
+      ) : null}
+
+      {dialog?.kind === 'recommendation' ? (
+        <Modal
+          kicker="Recommendations"
+          onClose={() => setDialog(null)}
+          footer={
+            <>
+              <button type="button" className="gw-btn" onClick={() => setDialog(null)}>Not for me</button>
+              <button
+                type="button"
+                className="gw-btn gw-btn--primary"
+                disabled={actState.isLoading || workspace.recommendations.find((item) => item.id === dialog.id)?.added}
+                onClick={() => {
+                  const item = workspace.recommendations.find((entry) => entry.id === dialog.id);
+                  void run({ action: 'apply_recommendation', recommendationId: dialog.id }).then((ok) => {
+                    if (ok) {
+                      showToast({ type: 'success', message: `Added to your plan · ${Math.max(item?.howSteps.length || 1, 1)} steps` });
+                      setDialog(null);
+                    }
+                  });
+                }}
+              >
+                Add to my plan
+              </button>
+            </>
+          }
+        >
+          {(() => {
+            const item = workspace.recommendations.find((entry) => entry.id === dialog.id);
+            if (!item) return null;
+            return (
+              <>
+                <p className="gw-lead">Recommended for this goal</p>
+                <h2>{item.title}</h2>
+                <p className="gw-lead">{item.reason}</p>
+                <p className="gw-lead">Window · {item.windowLabel || 'This goal'}</p>
+                {item.howSteps.length ? (
+                  <>
+                    <div className="gw-section-label"><span>HOW TO USE THIS</span></div>
+                    <ol className="gw-steps-detail">
+                      {item.howSteps.map((step, index) => <li key={step}><span>{index + 1}.</span> {step}</li>)}
+                    </ol>
+                  </>
+                ) : null}
+                {item.related.length ? (
+                  <>
+                    <div className="gw-section-label"><span>RELATED STEPS</span></div>
+                    {item.related.map((step) => (
+                      <button key={step.id} type="button" className="gw-choice" onClick={() => setDialog({ kind: 'step', id: step.id })}>
+                        <span><strong>{step.done ? <FiCheck size={14} aria-hidden="true" /> : <FiCircle size={14} aria-hidden="true" />} {step.label}</strong></span>
+                      </button>
+                    ))}
+                  </>
+                ) : null}
+              </>
+            );
+          })()}
+        </Modal>
+      ) : null}
+
+      {dialog?.kind === 'command' ? (
+        <div className="gw-modal-back" onMouseDown={() => setDialog(null)}>
+          <div className="gw-command" onMouseDown={(event) => event.stopPropagation()}>
+            <input autoFocus placeholder="Jump to a step, strategy, or recommendation" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <CommandResults
+              workspace={workspace}
+              query={query}
+              onPick={(kind, id) => setDialog(kind === 'step' ? { kind: 'step', id } : kind === 'strategy' ? { kind: 'strategy', id } : { kind: 'recommendation', id })}
+            />
+          </div>
         </div>
+      ) : null}
+
+      {undo ? (
+        <div className="gw-toast" role="status">
+          <FiCheck aria-hidden="true" />
+          <span>{undo.message}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void checkIn({ goalId, value: undo.value }).unwrap().then(() => setUndo(null)).catch((error) => {
+                showToast({ type: 'error', message: getApiErrorMessage(error, 'Unable to undo that update.') });
+              });
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
+const EvidenceNote = ({
+  item,
+}: {
+  item: { id?: string; label: string; kind: string; dateLabel?: string };
+}) => {
+  const copyRef = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [canToggle, setCanToggle] = useState(item.label.length > 180);
+
+  useEffect(() => {
+    const node = copyRef.current;
+    if (!node || open) return;
+    setCanToggle(node.scrollHeight > node.clientHeight + 2);
+  }, [item.label, open]);
+
+  return (
+    <div className={`gw-panel gw-evidence-card${open ? ' is-open' : ''}`}>
+      <small>{item.kind}{item.dateLabel ? ` · ${item.dateLabel}` : ''}</small>
+      <p ref={copyRef}>{item.label}</p>
+      {canToggle ? (
+        <button type="button" className="gw-more" onClick={() => setOpen((value) => !value)}>
+          {open ? 'See less' : 'See more'}
+        </button>
       ) : null}
     </div>
   );
 };
 
-const TrendArrow = ({ direction }: { direction: 'down' | 'up' }) => (
-  <svg className={`gd-trend is-${direction}`} viewBox="0 0 12 12" aria-hidden="true">
-    {direction === 'down' ? (
-      <path d="M2.2 3.2 L9.2 9.2 M9.2 9.2 H5.1 M9.2 9.2 V5.1" />
-    ) : (
-      <path d="M2.4 9.2 L9.2 2.6 M9.2 2.6 H5.1 M9.2 2.6 V6.7" />
-    )}
-  </svg>
+const Modal = ({
+  title,
+  kicker,
+  onClose,
+  footer,
+  children,
+}: {
+  title?: string;
+  kicker?: string;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+}) => (
+  <div className="gw-modal-back" onMouseDown={onClose}>
+    <div className="gw-modal" role="dialog" aria-modal="true" aria-label={title || kicker || 'Dialog'} onMouseDown={(event) => event.stopPropagation()}>
+      <header>
+        <span>{kicker || title}</span>
+        <button type="button" className="gw-close" onClick={onClose} aria-label="Close"><FiX size={18} /></button>
+      </header>
+      <div className="gw-body">{children}</div>
+      {footer ? <footer>{footer}</footer> : null}
+    </div>
+  </div>
 );
 
-export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
-  const { showToast } = useToast();
-  const dashboard = useGetGoalDashboardQuery(goalId);
-  const [approveRevision, approveRevisionState] = useApproveGoalRevisionMutation();
-  const detail = useMemo(() => buildDetail(goalId, dashboard.data, dashboard.isError ? dashboard.error : undefined), [
-    dashboard.data,
-    dashboard.error,
-    dashboard.isError,
-    goalId,
-  ]);
-  const [canScrollNext, setCanScrollNext] = useState(false);
-  const [stepFilter, setStepFilter] = useState<'all' | 'open' | 'done'>('all');
-  const [stepPage, setStepPage] = useState(0);
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [selectedRecId, setSelectedRecId] = useState<string | null>(null);
-  const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(null);
-  const strategiesRef = useRef<HTMLDivElement>(null);
-  const mainRef = useRef<HTMLDivElement>(null);
-
-  const filteredSteps = useMemo(() => {
-    if (stepFilter === 'open') return detail.steps.filter((step) => !step.done);
-    if (stepFilter === 'done') return detail.steps.filter((step) => step.done);
-    return detail.steps;
-  }, [detail.steps, stepFilter]);
-
-  const stepPageCount = Math.max(1, Math.ceil(filteredSteps.length / STEPS_PER_PAGE));
-  const safeStepPage = Math.min(stepPage, stepPageCount - 1);
-  const pagedSteps = filteredSteps.slice(
-    safeStepPage * STEPS_PER_PAGE,
-    safeStepPage * STEPS_PER_PAGE + STEPS_PER_PAGE,
-  );
-  const selectedStep = detail.steps.find((step) => step.id === selectedStepId) ?? null;
-  const selectedRec = detail.recommendations.find((item) => item.id === selectedRecId) ?? null;
-  const selectedStrategy = detail.strategies.find((item) => item.id === selectedStrategyId) ?? null;
-
-  useEffect(() => {
-    setStepPage(0);
-  }, [stepFilter, detail.steps.length]);
-
-  useEffect(() => {
-    if (selectedStepId && !detail.steps.some((step) => step.id === selectedStepId)) {
-      setSelectedStepId(null);
-    }
-  }, [detail.steps, selectedStepId]);
-
-  useEffect(() => {
-    if (selectedRecId && !detail.recommendations.some((item) => item.id === selectedRecId)) {
-      setSelectedRecId(null);
-    }
-  }, [detail.recommendations, selectedRecId]);
-
-  useEffect(() => {
-    if (selectedStrategyId && !detail.strategies.some((item) => item.id === selectedStrategyId)) {
-      setSelectedStrategyId(null);
-    }
-  }, [detail.strategies, selectedStrategyId]);
-
-  useEffect(() => {
-    const node = strategiesRef.current;
-    if (!node) return undefined;
-
-    const update = () => {
-      setCanScrollNext(node.scrollWidth - node.clientWidth > 8);
-    };
-
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [detail.strategies.length]);
-
-  const scrollStrategies = () => {
-    const node = strategiesRef.current;
-    if (!node) return;
-    const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 12;
-    node.scrollTo({
-      left: atEnd ? 0 : node.scrollLeft + Math.min(node.clientWidth * 0.72, 320),
-      behavior: 'smooth',
-    });
-  };
-
+const StepDialog = ({
+  workspace,
+  step,
+  celebrate,
+  note,
+  onNote,
+  busy,
+  onClose,
+  onTick,
+  onDone,
+  onReopen,
+  onReschedule,
+  onSaveNote,
+  onNext,
+}: {
+  workspace: GoalWorkspace;
+  step: GoalWorkspaceStep | null;
+  celebrate: boolean;
+  note: string;
+  onNote: (value: string) => void;
+  busy: boolean;
+  onClose: () => void;
+  onTick: (itemId: string, done: boolean) => void;
+  onDone: () => void;
+  onReopen: () => void;
+  onReschedule?: () => void;
+  onSaveNote: () => void;
+  onNext: () => void;
+}) => {
+  if (!step) return null;
   return (
-    <section className="gd-page" aria-label={`${detail.title} dashboard`}>
-      <nav className="gd-breadcrumb" aria-label="Breadcrumb">
-        <button type="button" className="gd-breadcrumb__link" onClick={onBack}>
-          Back
-        </button>
-        <FiChevronRight size={14} aria-hidden="true" />
-        <button type="button" className="gd-breadcrumb__muted" onClick={onBack}>
-          Achieve Goal
-        </button>
-        <FiChevronRight size={14} aria-hidden="true" />
-        <span className="gd-breadcrumb__current">{detail.title}</span>
-      </nav>
-      <div className="gd-body">
-        <aside className="gd-sidebar" aria-label="Recommended steps">
-          <div className="gd-steps-block">
-            <h2>
-              Recommended steps
-              {detail.taskProgressLabel ? <span className="gd-count">{detail.taskProgressLabel}</span> : null}
-            </h2>
-            {detail.mission ? <p className="gd-steps-mission">{detail.mission}</p> : null}
-
-            <div className="gd-steps-filters" role="tablist" aria-label="Filter steps">
-              {(
-                [
-                  { id: 'all', label: 'All' },
-                  { id: 'open', label: 'Open' },
-                  { id: 'done', label: 'Done' },
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={stepFilter === item.id}
-                  className={`gd-steps-filter${stepFilter === item.id ? ' is-active' : ''}`}
-                  onClick={() => setStepFilter(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            {dashboard.isLoading && !dashboard.data ? (
-              <div className="gd-steps-state" aria-busy="true">
-                <span className="gd-steps-spinner" />
-                <p>Loading steps…</p>
-              </div>
-            ) : null}
-
-            {dashboard.isError && !dashboard.data ? (
-              <div className="gd-steps-state" role="alert">
-                <p>{getApiErrorMessage(dashboard.error, 'Unable to load steps.')}</p>
-                <button type="button" className="gd-btn gd-btn--ghost" onClick={() => void dashboard.refetch()}>
-                  Retry
-                </button>
-              </div>
-            ) : null}
-
-            {!dashboard.isLoading && !dashboard.isError && pagedSteps.length === 0 ? (
-              <div className="gd-steps-state">
-                <p>{stepFilter === 'done' ? 'No completed steps yet.' : 'No recommended steps yet.'}</p>
-              </div>
-            ) : null}
-
-            {dashboard.data && pagedSteps.length > 0 ? (
-              <ol className="gd-steps">
-                {pagedSteps.map((step) => (
-                  <li key={step.id}>
-                    <button
-                      type="button"
-                      className={`gd-step${step.done ? ' is-done' : ''}${selectedStepId === step.id ? ' is-selected' : ''}`}
-                      onClick={() => setSelectedStepId(step.id)}
-                    >
-                      <span className="gd-step__bullet" aria-hidden="true">
-                        {step.done ? <i /> : null}
-                      </span>
-                      <span className="gd-step__copy">
-                        <small>{step.kicker}</small>
-                        <span>{step.label}</span>
-                      </span>
-                      <FiArrowRight className="gd-step__chevron" size={15} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-
-            {filteredSteps.length > STEPS_PER_PAGE ? (
-              <div className="gd-steps-pagination">
-                <button
-                  type="button"
-                  className="gd-btn gd-btn--ghost"
-                  disabled={safeStepPage <= 0}
-                  onClick={() => setStepPage((page) => Math.max(0, page - 1))}
-                >
-                  Previous
-                </button>
-                <span>
-                  {safeStepPage + 1} / {stepPageCount}
-                </span>
-                <button
-                  type="button"
-                  className="gd-btn gd-btn--ghost"
-                  disabled={safeStepPage >= stepPageCount - 1}
-                  onClick={() => setStepPage((page) => Math.min(stepPageCount - 1, page + 1))}
-                >
-                  Next
-                </button>
-              </div>
-            ) : null}
+    <Modal
+      kicker={`Timeline · Day ${step.dayIndex} of ${workspace.horizonDays}`}
+      onClose={onClose}
+      footer={
+        celebrate ? (
+          <>
+            <button type="button" className="gw-btn" onClick={onReopen}>Reopen</button>
+            <button type="button" className="gw-btn gw-btn--primary" onClick={onNext}>Up next</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="gw-btn" onClick={onClose}>Close</button>
+            <button type="button" className="gw-btn gw-btn--primary" disabled={busy} onClick={onDone}><FiCheck size={14} aria-hidden="true" /> Mark done</button>
+          </>
+        )
+      }
+    >
+      {celebrate ? (
+        <div className="gw-done-banner">
+          <div className="gw-trophy" aria-hidden="true"><FiCheckCircle size={28} strokeWidth={1.75} /></div>
+          <h2>Day {step.dayIndex} done. Nice work!</h2>
+          <p className="gw-lead">{step.title}</p>
+        </div>
+      ) : (
+        <>
+          <p className="gw-lead" style={{ color: '#4d6fd4', fontWeight: 650, letterSpacing: '0.04em', fontSize: 12 }}>
+            {step.date === workspace.today ? `TODAY · DUE ${step.dateLabel.toUpperCase()}` : step.dateLabel.toUpperCase()}
+          </p>
+          <h2>{step.title} {step.example ? <span className="gw-chip">example</span> : null}</h2>
+          <p className="gw-lead">Part of “{step.partOf}”.</p>
+          <dl className="gw-fact">
+            <dt>Why</dt>
+            <dd>{step.why || 'This step moves the goal forward.'}</dd>
+            <dt>Outcome</dt>
+            <dd>{step.outcome || step.doneWhen || 'Done when every checklist step is finished.'}</dd>
+          </dl>
+          {onReschedule ? <button type="button" className="gw-btn" onClick={onReschedule}><FiCalendar size={14} aria-hidden="true" /> Reschedule</button> : null}
+        </>
+      )}
+      <div className="gw-grid-2" style={{ marginTop: 12 }}>
+        <div>
+          <div className="gw-check-head">
+            <span>CHECKLIST</span>
+            <span>{step.checklistDone} of {step.checklistTotal}</span>
           </div>
-        </aside>
-
-        <GoalStepDrawer
-          goalId={goalId}
-          step={selectedStep}
-          onClose={() => setSelectedStepId(null)}
-          onUpdated={() => {
-            showToast({ type: 'success', message: 'Step updated.' });
-          }}
-        />
-
-        <GoalRecDrawer
-          item={selectedRec}
-          busy={approveRevisionState.isLoading}
-          onClose={() => setSelectedRecId(null)}
-          onAction={(kind) => {
-            if (kind === 'retry') {
-              void dashboard.refetch().finally(() => setSelectedRecId(null));
-              return;
-            }
-            void approveRevision(goalId)
-              .unwrap()
-              .then(() => {
-                showToast({ type: 'success', message: 'Plan update approved.' });
-                setSelectedRecId(null);
-              })
-              .catch((error) => {
-                showToast({
-                  type: 'error',
-                  message: getApiErrorMessage(error, 'Unable to approve that plan update.'),
-                });
-              });
-          }}
-        />
-
-        <GoalStrategyDrawer item={selectedStrategy} onClose={() => setSelectedStrategyId(null)} />
-
-        <div className="gd-main" ref={mainRef}>
-          <section className="gd-stage" aria-label="Reduction chart">
-            <h2 className="gd-chart-title">Real reduction vs. Targeted reduction</h2>
-            <ReductionChart points={detail.chart.points} years={detail.chart.years} />
-          </section>
-
-          <aside className="gd-recs" aria-label="Recommendations">
-            <h2>Recommendations</h2>
-            {detail.recommendations.length === 0 ? (
-              <p className="gd-recs__empty">No recommendations yet for this goal.</p>
-            ) : (
-              <ul className="gd-rec-list">
-                {detail.recommendations.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        className={`gd-rec${selectedRecId === item.id ? ' is-selected' : ''}`}
-                        onClick={() => setSelectedRecId(item.id)}
-                      >
-                        <span className="gd-rec-list__icon" aria-hidden="true">
-                          <Icon size={15} strokeWidth={1.7} />
-                        </span>
-                        <div className="gd-rec__copy">
-                          <strong>{item.title}</strong>
-                          <p>
-                            {item.before}
-                            {item.after ? item.after : null}
-                          </p>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </aside>
-
-          <section className="gd-strategies" aria-label="Strategies">
-            <div className="gd-strategies__head">
-              <h2>
-                Strategies
-                <span className="gd-count">{detail.strategies.length}</span>
-              </h2>
-            </div>
-
-            <div className="gd-strategies__wrap">
-              <div className="gd-strategies__track" ref={strategiesRef}>
-                {detail.strategies.map((strategy) => (
-                  <button
-                    key={strategy.id}
-                    type="button"
-                    className={`gd-strategy gd-strategy--button${selectedStrategyId === strategy.id ? ' is-selected' : ''}`}
-                    onClick={() => setSelectedStrategyId(strategy.id)}
-                  >
-                    <header className="gd-strategy__head">
-                      <div>
-                        <strong>{strategy.title}</strong>
-                        <small>{strategy.period}</small>
-                      </div>
-                      <div className="gd-strategy__tools">
-                        <span className={`gd-status is-${strategy.status.toLowerCase()}`}>{strategy.status}</span>
-                      </div>
-                    </header>
-                    {strategy.body ? <p className="gd-strategy__body">{strategy.body}</p> : null}
-                    <div className="gd-strategy__metrics">
-                      {strategy.metrics.map((metric) => (
-                        <div key={`${strategy.id}-${metric.label}`} className="gd-strategy__metric">
-                          <strong>
-                            <TrendArrow direction={metric.direction} />
-                            {metric.value}
-                          </strong>
-                          <span>{metric.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {canScrollNext ? (
-                <button type="button" className="gd-strategies__next" aria-label="Next strategies" onClick={scrollStrategies}>
-                  <FiArrowRight size={16} aria-hidden="true" />
-                </button>
-              ) : null}
-            </div>
-          </section>
+          <div className={`gw-check-bar${step.checklistTotal > 0 && step.checklistDone === step.checklistTotal ? ' is-done' : ''}`}>
+            <span style={{ width: `${step.checklistTotal ? (step.checklistDone / step.checklistTotal) * 100 : 0}%` }} />
+          </div>
+          {step.checklist.length === 0 ? <p className="gw-lead">This step has no checklist items yet.</p> : null}
+          {step.checklist.map((item, index) => (
+            <label key={item.id} className={`gw-check${item.done ? ' is-on' : ''}`}>
+              <input type="checkbox" checked={item.done} onChange={(event) => onTick(item.id, event.target.checked)} />
+              <span className="gw-check__copy">
+                <span>{item.text}</span>
+                {item.why ? <small>{item.why}</small> : null}
+                {item.definitionOfDone ? <small>Done when {item.definitionOfDone}</small> : null}
+              </span>
+              <span className="gw-kbd">{index + 1}</span>
+            </label>
+          ))}
+        </div>
+        <div>
+          <div className="gw-section-label"><span>DONE WHEN</span></div>
+          <div className="gw-panel">{step.doneWhen || 'The checklist is finished and the outcome is true.'}</div>
+          {workspace.coach.evidence.length ? (
+            <>
+              <div className="gw-section-label" style={{ marginTop: 14 }}><span>EVIDENCE</span></div>
+              {workspace.coach.evidence.map((item) => (
+                <EvidenceNote key={item.id || item.label} item={item} />
+              ))}
+            </>
+          ) : null}
         </div>
       </div>
-    </section>
+      <div className="gw-section-label" style={{ marginTop: 8 }}><span>NOTES</span><span style={{ fontWeight: 500, letterSpacing: 0 }}>Autosaves</span></div>
+      <textarea className="gw-notes" value={note} placeholder="Blockers, decisions, evidence, or next steps…" onChange={(event) => onNote(event.target.value)} onBlur={onSaveNote} />
+    </Modal>
   );
 };
 
-const buildDetail = (goalId: string, data: GoalDashboard | undefined, error: unknown) => {
-  const title = data?.title || 'Goal';
-  const year = String(new Date().getFullYear());
-  const executionPercent = (() => {
-    if (data?.taskProgress && data.taskProgress.total > 0) {
-      return Math.round((data.taskProgress.completed / data.taskProgress.total) * 100);
-    }
-    const ratio = data?.progress?.execution?.ratio;
-    if (typeof ratio === 'number' && Number.isFinite(ratio)) {
-      return Math.round(ratio <= 1 ? ratio * 100 : ratio);
-    }
-    return data?.outcomeProgress ?? null;
-  })();
-  const chartPoints: GoalChartPoint[] = (data?.chart.points ?? []).map((point, index) => {
-    const pointYear = /^\d{4}/.test(point.label) ? point.label.slice(0, 4) : year;
-    return {
-      id: `${goalId}-${point.label || index}`,
-      label: point.label || `Point ${index + 1}`,
-      year: pointYear,
-      quarter: 'Q1',
-      real: point.actual ?? executionPercent,
-      targeted: point.target ?? 100,
-    };
-  });
-  if (chartPoints.length === 0) {
-    chartPoints.push({
-      id: `${goalId}-now`,
-      label: 'Now',
-      year,
-      quarter: 'Q1',
-      real: executionPercent ?? 0,
-      targeted: 100,
-    });
-  }
-  if (chartPoints.length === 1) {
-    chartPoints.unshift({
-      id: `${goalId}-start`,
-      label: 'Start',
-      year: chartPoints[0].year,
-      quarter: 'Q1',
-      real: 0,
-      targeted: 100,
-    });
-  }
-  const years = [...new Set(chartPoints.map((point) => point.year))];
-  const milestones = data?.milestones ?? [];
-  const planDays = data?.days ?? [];
-  const mission = (data?.mission || '').trim();
-  const recommendation = (data?.recommendation || data?.planSummary || '').trim();
-  const goalSuccess = (data?.successCriteria || '').trim();
-  const phases = data?.phases ?? [];
+const StrategyDialog = ({
+  item,
+  onClose,
+  onOpenStep,
+}: {
+  item: GoalWorkspace['strategies'][number] | null;
+  onClose: () => void;
+  onOpenStep: (id: string) => void;
+}) => {
+  if (!item) return null;
+  return (
+    <Modal kicker="Strategies" onClose={onClose} footer={<button type="button" className="gw-btn" onClick={onClose}>Close</button>}>
+      <Ring value={item.percent} tone={item.percent >= 100 ? 'green' : 'blue'} />
+      <h2>{item.title}</h2>
+      <p className="gw-lead">{item.done} of {item.total} linked steps done · {item.windowLabel}</p>
+      <p className="gw-lead">{item.overview}</p>
+      <div className="gw-section-label"><span>LINKED STEPS</span></div>
+      {item.linkedSteps.length === 0 ? <p className="gw-lead">No steps are linked to this strategy yet.</p> : null}
+      {item.linkedSteps.map((step) => (
+        <button key={step.id} type="button" className="gw-choice" onClick={() => onOpenStep(step.id)}>
+          <span><strong>{step.done ? <FiCheck size={14} aria-hidden="true" /> : <FiCircle size={14} aria-hidden="true" />} {step.title}</strong><small>{step.dayLabel}</small></span>
+        </button>
+      ))}
+    </Modal>
+  );
+};
 
-  const dayTasks: GoalStepDetail[] = planDays.flatMap((day, dayIndex) => {
-    const dayLabel = day.dateLabel || day.title || `Day ${day.dayIndex ?? dayIndex + 1}`;
-    const dayTitle = (day.title || '').trim();
-    const dayFocus = (day.focus || '').trim();
-    const dayDone = (day.definitionOfDone || '').trim();
-    const tasks = day.tasks ?? [];
-    const matchingPhase =
-      phases.find((phase) => {
-        const hay = `${phase.title} ${phase.windowLabel || ''} ${phase.outcome || ''}`.toLowerCase();
-        return Boolean(dayTitle) && hay.includes(dayTitle.toLowerCase().slice(0, 18));
-      }) || phases[Math.min(dayIndex, Math.max(phases.length - 1, 0))];
+const CheckInView = ({
+  workspace,
+  reflection,
+  onReflection,
+  picked,
+  onToggle,
+}: {
+  workspace: GoalWorkspace;
+  reflection: string;
+  onReflection: (value: string) => void;
+  picked: string[];
+  onToggle: (id: string) => void;
+}) => {
+  const checkIn = workspace.checkIn;
+  return (
+    <div className="gw-checkin">
+      <div>
+        <p className="gw-kicker">{checkIn?.weekLabel || 'THIS WEEK'} · CHECK-IN</p>
+        <h1 className="gw-title">{checkIn?.headline || 'Weekly check-in'}</h1>
+        <div className="gw-metrics">
+          <article><small>Steps</small><strong>{checkIn?.stepsDone ?? workspace.stepsDone}/{checkIn?.stepsTotal ?? workspace.stepsTotal}</strong></article>
+          <article><small>{workspace.metric.label} vs target</small><strong>{checkIn?.usersCurrent ?? workspace.metric.current ?? 0}/{checkIn?.usersTarget ?? workspace.metric.todayTarget ?? '—'}</strong></article>
+          <article><small>Pace</small><strong className={(checkIn?.pacePercent ?? 100) < 80 ? 'is-bad' : ''}>{checkIn?.pacePercent ?? '—'}%</strong></article>
+          <article><small>Notes added</small><strong>{checkIn?.notesAdded ?? 0}</strong></article>
+        </div>
+        <section className="gw-card">
+          <h2>What got done</h2>
+          <ul className="gw-done-list">
+            {(checkIn?.completed ?? []).map((item) => (
+              <li key={item.id}>
+                <span>{item.done ? <FiCheckCircle size={15} aria-hidden="true" /> : <FiCircle size={15} aria-hidden="true" />} {item.title}</span>
+                <span>{item.overdue ? 'Overdue' : item.doneOn ? `Done ${item.doneOn}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="gw-card" style={{ marginTop: 12 }}>
+          <h2>Suggested adjustments</h2>
+          {(checkIn?.adjustments ?? []).map((item) => (
+            <label key={item.id} className="gw-adjust">
+              <input type="checkbox" checked={picked.includes(item.id)} onChange={() => onToggle(item.id)} />
+              <span><strong>{item.title}</strong><small style={{ display: 'block', color: '#8b919e' }}>{item.reason}</small></span>
+            </label>
+          ))}
+        </section>
+      </div>
+      <aside>
+        <section className="gw-card">
+          <h2>Real vs targeted</h2>
+          <PaceChart points={workspace.chart} />
+        </section>
+        <section className="gw-card">
+          <h2>Reflection</h2>
+          <textarea className="gw-notes" style={{ width: '100%', margin: '8px 0 0' }} value={reflection} placeholder="What helped this week? What got in the way?" onChange={(event) => onReflection(event.target.value)} />
+          <p className="gw-chart-foot">Saved on the goal when you apply changes.</p>
+        </section>
+      </aside>
+    </div>
+  );
+};
 
-    return tasks.map((task, taskIndex) => {
-      const label = task.text;
-      const siblings = tasks
-        .filter((other, otherIndex) => (other.id || otherIndex) !== (task.id || taskIndex))
-        .map((other) => other.text)
-        .filter(Boolean)
-        .slice(0, 3);
-      const taskWhy = (task.why || '').trim();
-      const taskDone = (task.definitionOfDone || '').trim();
-
-      // Prefer plan-authored fields. Keep drawer short and avoid repeating the same idea.
-      const overviewParts = [
-        dayFocus || null,
-        matchingPhase?.outcome ? `Phase outcome: ${matchingPhase.outcome}` : null,
-      ].filter(Boolean) as string[];
-      if (overviewParts.length === 0) {
-        overviewParts.push(`Part of ${dayTitle || dayLabel}.`);
-      }
-
-      const whyItMatters = taskWhy || undefined;
-
-      const howSteps = [
-        `Do: ${label}`,
-        taskDone ? `Stop when: ${taskDone}` : dayDone ? `Day target: ${dayDone}` : null,
-      ].filter(Boolean) as string[];
-
-      const definitionOfDone = taskDone || dayDone || `“${label}” is finished and checkable.`;
-
-      const doneChecks = [definitionOfDone, siblings.length > 0 ? `Related today: ${siblings[0]}` : null].filter(
-        Boolean,
-      ) as string[];
-
-      return {
-        id: task.id || `${goalId}-day-${dayIndex}-task-${taskIndex}`,
-        taskId: task.id || '',
-        kicker: dayLabel,
-        label,
-        done: Boolean(task.done),
-        note: task.note || '',
-        dayTitle,
-        hours: day.hours ?? null,
-        overviewParts,
-        whyItMatters,
-        howSteps,
-        definitionOfDone,
-        doneChecks,
-        relatedTasks: siblings,
-        dayFocus: dayFocus || undefined,
-      };
-    });
-  });
-
-  const steps: GoalStepDetail[] =
-    dayTasks.length > 0
-      ? [...dayTasks].sort((left, right) => Number(left.done) - Number(right.done))
-      : milestones.length > 0
-        ? milestones.map((milestone, index) => {
-            const criteria = milestone.successCriteria.filter(Boolean);
-            const definitionOfDone =
-              criteria[0] ||
-              `“${milestone.title}” is finished with clear evidence you can review.`;
-            return {
-              id: `${goalId}-step-${index}`,
-              taskId: '',
-              kicker: milestone.dueLabel || milestone.status.replace(/_/g, ' '),
-              label: milestone.title,
-              done: milestone.status === 'DONE',
-              note: '',
-              dayTitle: milestone.title,
-              hours: null,
-              overviewParts: [
-                `“${milestone.title}” is a milestone on the path to “${title}”.`,
-                mission ? `Mission: ${mission}` : null,
-                recommendation || null,
-              ].filter(Boolean) as string[],
-              whyItMatters:
-                criteria.length > 0
-                  ? `This milestone matters because success is defined as: ${criteria.join('; ')}.`
-                  : 'Completing this milestone keeps the plan honest and sequenced.',
-              howSteps: [
-                'Treat the success criteria as a checklist.',
-                'Produce evidence for each criterion before marking the milestone done.',
-              ],
-              definitionOfDone,
-              doneChecks:
-                criteria.length > 0
-                  ? [...criteria, 'Evidence is written down so a weekly review can verify it']
-                  : [
-                      `“${milestone.title}” has a concrete, reviewable result`,
-                      'Evidence is written down so a weekly review can verify it',
-                    ],
-            };
-          })
-        : [
-            {
-              id: `${goalId}-step-goal`,
-              taskId: '',
-              kicker: data?.deadlineLabel || 'Goal',
-              label: data?.statement || title,
-              done: false,
-              note: '',
-              dayTitle: title,
-              hours: null,
-              overviewParts: [
-                recommendation ||
-                  mission ||
-                  data?.statement ||
-                  `Work toward “${title}” with one clear, reviewable outcome at a time.`,
-              ].filter(Boolean) as string[],
-              whyItMatters: goalSuccess
-                ? `You are done with the goal only when: ${goalSuccess}.`
-                : 'Break the outcome into smaller steps so progress stays measurable.',
-              howSteps: [
-                'Clarify the next smallest deliverable.',
-                'Set a time box and finish that piece.',
-                'Capture evidence when you finish.',
-              ],
-              definitionOfDone:
-                goalSuccess ||
-                `You can point to concrete evidence that “${title}” is meaningfully closer than before.`,
-              doneChecks: [
-                'There is a reviewable output from this work session',
-                goalSuccess ? `Progress is compatible with: ${goalSuccess}` : 'The next step is clearer than before',
-                'Notes capture what changed and what is still open',
-              ].filter(Boolean) as string[],
-            },
-          ];
-  const planStrategies = data?.strategies ?? [];
-  const strategies: GoalStrategyDetail[] =
-    planStrategies.length > 0
-      ? planStrategies.map((strategy, index) => {
-          const tagLine = (strategy.tags ?? []).slice(0, 2).join(' · ');
-          const progressValue =
-            executionPercent == null
-              ? shortLabel(data?.outcomeLabel || 'Open', 18)
-              : `${executionPercent}%`;
-          const tasksValue =
-            data?.taskProgress && data.taskProgress.total > 0
-              ? `${data.taskProgress.completed}/${data.taskProgress.total}`
-              : `${data?.workCompleted ?? 0}/${data?.workTotal ?? 0}`;
-          return {
-            id: strategy.id || `${goalId}-strategy-${index}`,
-            title: strategy.title,
-            kicker: tagLine || 'Strategy',
-            statusLabel: 'Active',
-            // Keep card subtitle short; full measurable goal stays in the drawer.
-            period: shortLabel(tagLine || data?.timeframe || 'Strategy', 48),
-            body: strategy.body,
-            measurableGoal: strategy.measurableGoal || '',
-            why: strategy.why || '',
-            proofPoints: strategy.proofPoints || [],
-            effort: strategy.effort || '',
-            status: 'ACTIVE' as const,
-            metrics: [
-              {
-                direction: 'up' as const,
-                value: progressValue,
-                label: 'Progress',
-              },
-              {
-                direction: 'up' as const,
-                value: strategy.effort ? shortLabel(strategy.effort, 28) : tasksValue,
-                label: strategy.effort ? 'Effort' : 'Tasks done',
-              },
-            ],
-          };
-        })
-      : (milestones.length > 0
-          ? milestones
-          : [
-              {
-                title,
-                dueLabel: data?.deadlineLabel || '',
-                successCriteria: data?.successCriteria ? [data.successCriteria] : [],
-                status: 'PENDING',
-              },
-            ]
-        ).map((milestone, index) => ({
-          id: `${goalId}-strategy-${index}`,
-          title: milestone.title,
-          kicker: milestone.dueLabel || data?.timeframe || 'This plan',
-          statusLabel: milestone.status === 'DONE' ? 'Done' : 'Active',
-          period: milestone.dueLabel || data?.timeframe || 'This plan',
-          body: (milestone.successCriteria || []).join(' · ') || milestone.title,
-          measurableGoal: (milestone.successCriteria || [])[0] || '',
-          why: `This strategy milestone keeps “${title}” sequenced and measurable.`,
-          proofPoints: milestone.successCriteria || [],
-          effort: '',
-          status: (milestone.status === 'DONE' ? 'DONE' : 'ACTIVE') as 'ACTIVE' | 'DONE',
-          metrics: [
-            {
-              direction: milestone.status === 'DONE' ? ('up' as const) : ('down' as const),
-              value: milestone.status === 'DONE' ? 'Done' : 'Open',
-              label: shortLabel(milestone.successCriteria[0] || 'Success criteria', 24) || 'Success criteria',
-            },
-            {
-              direction: 'up' as const,
-              value:
-                data?.outcomeProgress == null
-                  ? shortLabel(data?.outcomeLabel || 'Not verified', 18)
-                  : `${Math.round(data.outcomeProgress)}%`,
-              label: 'Outcome',
-            },
-          ],
-        }));
-  const goalStatement = (data?.statement || title).trim();
-  const deadlineLabel = (data?.deadlineLabel || data?.timeframe || '').trim();
-  const recommendations: GoalRecListItem[] = [
-    ...(data?.recommendations ?? []).map((item, index) => {
-      const priority = (item.priority || 'MEDIUM').replace(/_/g, ' ');
-      const duration = item.suggestedDurationMinutes
-        ? `About ${item.suggestedDurationMinutes} minutes`
-        : '';
-      const reason = (item.reason || '').trim() || `Next useful move for “${title}”.`;
-      const howSteps =
-        item.howSteps && item.howSteps.length > 0
-          ? item.howSteps.slice(0, 3)
-          : [item.measurableGoal ? `Aim for: ${item.measurableGoal}` : `Start “${item.title}” today.`].filter(Boolean);
-      return {
-        id: item.id,
-        title: item.title,
-        kicker: priority,
-        statusLabel: item.milestoneTitle ? 'Linked' : 'Priority',
-        summary: reason,
-        overviewParts: [reason],
-        whyItMatters: item.measurableGoal ? `Done when: ${item.measurableGoal}` : undefined,
-        howSteps,
-        details: [
-          { label: 'Priority', value: priority },
-          item.milestoneTitle ? { label: 'Milestone', value: item.milestoneTitle } : null,
-          duration ? { label: 'Time', value: duration } : null,
-        ].filter(Boolean) as Array<{ label: string; value: string }>,
-        related: [],
-        before: reason,
-        after: duration ? ` ${duration}.` : '',
-        linkLabel: '',
-        icon: REC_ICONS[index % REC_ICONS.length],
-      };
-    }),
-  ];
-  if (data?.latestReview) {
-    const reviewSummary = data.latestReview.summary || 'Review notes are available for this period.';
-    recommendations.push({
-      id: `${goalId}-review`,
-      title: `${data.latestReview.periodType} review`,
-      kicker: 'Review',
-      statusLabel: data.latestReview.periodType,
-      summary: reviewSummary,
-      overviewParts: [
-        `This ${data.latestReview.periodType} review summarizes recent progress on “${title}”.`,
-        reviewSummary,
-      ],
-      whyItMatters:
-        'Reviews keep the plan honest. Use them to decide what to continue, adjust, or stop.',
-      howSteps: [
-        'Read the review summary and highlight one risk or win.',
-        data.latestReview.focus
-          ? `Make the next focus concrete: ${data.latestReview.focus}`
-          : 'Choose one next focus for the coming period.',
-        'Update notes or mark related steps done if evidence already exists.',
-      ],
-      details: [
-        { label: 'Period', value: data.latestReview.periodType },
-        data.latestReview.focus ? { label: 'Next focus', value: data.latestReview.focus } : null,
-      ].filter(Boolean) as Array<{ label: string; value: string }>,
-      related: [mission ? `Mission: ${mission}` : null].filter(Boolean) as string[],
-      before: reviewSummary,
-      after: data.latestReview.focus ? ` Next: ${data.latestReview.focus}` : '',
-      linkLabel: '',
-      icon: REC_ICONS[recommendations.length % REC_ICONS.length],
-    });
-  }
-  if (data?.proposedRevision) {
-    const revisionSummary =
-      data.proposedRevision.summary || 'A weekly review suggested a new version of this plan.';
-    recommendations.unshift({
-      id: 'plan-revision',
-      title: 'Proposed plan update',
-      kicker: 'Revision',
-      statusLabel: `v${data.proposedRevision.version}`,
-      summary: revisionSummary,
-      overviewParts: [
-        `A revised plan (version ${data.proposedRevision.version}) is ready for “${title}”.`,
-        revisionSummary,
-      ],
-      whyItMatters:
-        'Approving replaces the current plan with the revised sequence so later steps stay aligned with the latest review.',
-      howSteps: [
-        'Scan the proposed changes against your current capacity.',
-        'Approve only if the update still matches your success criteria.',
-        'After approval, continue from the updated recommended steps.',
-      ],
-      details: [
-        { label: 'Version', value: String(data.proposedRevision.version) },
-        goalSuccess ? { label: 'Success bar', value: goalSuccess } : null,
-      ].filter(Boolean) as Array<{ label: string; value: string }>,
-      actionLabel: 'Approve update',
-      actionKind: 'approve',
-      before: revisionSummary,
-      after: '',
-      linkLabel: 'Approve update',
-      icon: REC_ICONS[0],
-    });
-  }
-  if (data?.positioningHeadline || data?.positioningBody) {
-    const headline = (data.positioningHeadline || 'Positioning').trim();
-    const body = (data.positioningBody || '').trim();
-    recommendations.unshift({
-      id: `${goalId}-positioning`,
-      title: headline,
-      kicker: 'Positioning',
-      statusLabel: 'Message',
-      summary: body || headline,
-      overviewParts: [body || headline],
-      whyItMatters: undefined,
-      howSteps: data.immediateNextStep ? [data.immediateNextStep] : [],
-      details: deadlineLabel ? [{ label: 'Window', value: deadlineLabel }] : [],
-      related: (data.funnelTargets ?? []).slice(0, 4),
-      before: body || headline,
-      after: '',
-      linkLabel: '',
-      icon: REC_ICONS[0],
-    });
-  } else if (data?.recommendation || data?.planSummary) {
-    const expertText = (data.recommendation || data.planSummary || '').trim();
-    recommendations.unshift({
-      id: `${goalId}-plan`,
-      title: 'Expert recommendation',
-      kicker: 'Guidance',
-      statusLabel: 'Plan',
-      summary: expertText,
-      overviewParts: expertText.split(/(?<=[.!?])\s+/).slice(0, 3).filter(Boolean),
-      whyItMatters: undefined,
-      howSteps: goalSuccess ? [`Aim for: ${goalSuccess}`] : [],
-      details: deadlineLabel ? [{ label: 'Timeframe', value: deadlineLabel }] : [],
-      related: [],
-      before: expertText,
-      after: '',
-      linkLabel: '',
-      icon: REC_ICONS[0],
-    });
-  }
-  (data?.successDefinition?.metrics ?? []).slice(0, 3).forEach((metric, index) => {
-    recommendations.push({
-      id: `${goalId}-metric-${index}`,
-      title: metric.label,
-      kicker: 'Metric',
-      statusLabel: 'Target',
-      summary: `Target: ${metric.target}`,
-      overviewParts: [
-        `“${metric.label}” is a success metric for “${title}”.`,
-        `Target to hit: ${metric.target}.`,
-      ],
-      whyItMatters:
-        'Metrics turn vague progress into something you can verify during weekly review.',
-      howSteps: [
-        `Decide what evidence proves progress on “${metric.label}”.`,
-        `Compare current reality to the target: ${metric.target}.`,
-        'Update notes or check-ins when the metric moves.',
-      ],
-      details: [
-        { label: 'Metric', value: metric.label },
-        { label: 'Target', value: metric.target },
-        deadlineLabel ? { label: 'Window', value: deadlineLabel } : null,
-      ].filter(Boolean) as Array<{ label: string; value: string }>,
-      before: `Target: ${metric.target}`,
-      after: '',
-      linkLabel: '',
-      icon: REC_ICONS[(index + 1) % REC_ICONS.length],
-    });
-  });
-  if (!data && !error) {
-    recommendations.push({
-      id: `${goalId}-loading`,
-      title: 'Reading this goal',
-      kicker: 'Status',
-      statusLabel: 'Loading',
-      summary: 'The chart, steps, and recommendations are loading from your plan.',
-      overviewParts: ['The chart, steps, and recommendations are loading from your plan.'],
-      howSteps: ['Wait a moment, then open a recommendation again if detail is still incomplete.'],
-      before: 'The chart, steps, and recommendations are loading from your plan.',
-      after: '',
-      linkLabel: '',
-      icon: REC_ICONS[0],
-    });
-  }
-  if (error) {
-    const message = getApiErrorMessage(error, 'Unable to load this goal.');
-    recommendations.unshift({
-      id: 'load-error',
-      title: 'This goal did not load',
-      kicker: 'Error',
-      statusLabel: 'Retry',
-      summary: message,
-      overviewParts: [message, 'Retry loading to refresh recommendations, steps, and chart data.'],
-      howSteps: ['Check your connection.', 'Retry loading this goal.', 'If it fails again, reopen the goal from the list.'],
-      actionLabel: 'Retry',
-      actionKind: 'retry',
-      before: message,
-      after: '',
-      linkLabel: 'Retry',
-      icon: REC_ICONS[0],
-    });
-  }
-  const taskProgressLabel =
-    data?.taskProgress && data.taskProgress.total > 0
-      ? `${data.taskProgress.completed}/${data.taskProgress.total}`
-      : '';
-
-  return {
-    title,
-    mission: data?.mission || '',
-    taskProgressLabel,
-    steps,
-    strategies,
-    recommendations,
-    chart: { years, points: chartPoints },
-  };
+const CommandResults = ({
+  workspace,
+  query,
+  onPick,
+}: {
+  workspace: GoalWorkspace;
+  query: string;
+  onPick: (kind: 'step' | 'strategy' | 'recommendation', id: string) => void;
+}) => {
+  const needle = query.trim().toLowerCase();
+  const match = (value: string) => !needle || value.toLowerCase().includes(needle);
+  const steps = workspace.weeks.flatMap((week) => week.steps).filter((step) => match(step.title));
+  const strategies = workspace.strategies.filter((item) => match(item.title));
+  const recommendations = workspace.recommendations.filter((item) => match(item.title));
+  return (
+    <div>
+      {steps.length ? <h3>STEPS</h3> : null}
+      {steps.slice(0, 6).map((step) => (
+        <button key={step.id} type="button" onClick={() => onPick('step', step.id)}>
+          <span>{step.title}</span><small>Day {step.dayIndex}</small>
+        </button>
+      ))}
+      {strategies.length ? <h3>STRATEGIES</h3> : null}
+      {strategies.slice(0, 4).map((item) => (
+        <button key={item.id} type="button" onClick={() => onPick('strategy', item.id)}><span>{item.title}</span></button>
+      ))}
+      {recommendations.length ? <h3>RECOMMENDATIONS</h3> : null}
+      {recommendations.slice(0, 4).map((item) => (
+        <button key={item.id} type="button" onClick={() => onPick('recommendation', item.id)}><span>{item.title}</span></button>
+      ))}
+    </div>
+  );
 };

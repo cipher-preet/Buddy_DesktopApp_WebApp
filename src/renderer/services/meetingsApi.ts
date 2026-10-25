@@ -100,6 +100,7 @@ export const meetingsApi = api.injectEndpoints({
       query: ({ queryArg, pageParam }) => ({
         url: 'meeting-recordings',
         params: {
+          view: 'card',
           limit: queryArg.limit ?? DEFAULT_MEETINGS_LIMIT,
           ...(pageParam ? { cursor: pageParam } : {}),
           ...(queryArg.spaceId ? { spaceId: queryArg.spaceId } : {}),

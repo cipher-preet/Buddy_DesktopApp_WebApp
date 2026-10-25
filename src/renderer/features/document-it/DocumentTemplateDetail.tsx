@@ -12,6 +12,11 @@ import {
 import type { IconType } from 'react-icons';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  SourceScopePicker,
+  generationRequestFields,
+  type GenerationScope,
+} from '@/components/common/SourceScopePicker';
 import { useToast } from '@/app/ToastProvider';
 import { getStoredAuthToken } from '@/features/auth/authStorage';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
@@ -112,6 +117,10 @@ export const DocumentTemplateDetail = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   const [generateDocument, { isLoading: isStartingGenerate }] = useGenerateDocumentMutation();
+  const [generationScope, setGenerationScope] = useState<GenerationScope>({
+    mode: 'space',
+    dates: [],
+  });
 
   const {
     data: spacesData,
@@ -322,6 +331,7 @@ export const DocumentTemplateDetail = ({
         userId,
         spaceId: confirmedSpace.id,
         templateCode: template.id,
+        ...generationRequestFields(generationScope),
       }).unwrap();
 
       setGeneration({
@@ -463,13 +473,26 @@ export const DocumentTemplateDetail = ({
               </div>
             ) : null}
 
+            {confirmedSpace && !isGenerating && !generationReady ? (
+              <SourceScopePicker
+                userId={userId}
+                spaceId={confirmedSpace.id}
+                value={generationScope}
+                onChange={setGenerationScope}
+                disabled={isStartingGenerate}
+              />
+            ) : null}
+
             <div className="document-detail__action-row">
               {hasConfirmedSpace && !isGenerating && !generationReady ? (
                 <button
                   type="button"
                   className="document-detail__primary document-detail__primary--brand"
                   onClick={() => void handleDocumentIt()}
-                  disabled={isStartingGenerate}
+                  disabled={
+                    isStartingGenerate ||
+                    (generationScope.mode === 'date' && generationScope.dates.length === 0)
+                  }
                 >
                   <FiZap aria-hidden="true" size={16} />
                   {generationFailed ? 'Try again' : isStartingGenerate ? 'Starting…' : 'Document it'}

@@ -50,6 +50,9 @@ export type ProfileSummary = {
   spacesCount: number;
 };
 
+/** Asks Node for the fields the home screen renders, leaving the mobile payload unchanged. */
+const CARD_VIEW = { view: 'card' } as const;
+
 const unwrapHomeData = <T,>(response: HomeApiEnvelope<T>, fallbackMessage: string): T => {
   if (!response?.success || response.data === undefined) {
     throw new Error(response?.message || fallbackMessage);
@@ -83,6 +86,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ queryArg, pageParam }) => ({
         url: 'home/getuserspaces',
         params: {
+          ...CARD_VIEW,
           userId: queryArg.userId,
           limit: queryArg.limit ?? 10,
           counts: queryArg.counts ?? 'all',
@@ -116,6 +120,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ queryArg, pageParam }) => ({
         url: 'home/getStagedTasksBySpace',
         params: {
+          ...CARD_VIEW,
           userId: queryArg.userId,
           spaceId: queryArg.spaceId,
           limit: queryArg.limit ?? 10,
@@ -139,6 +144,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ queryArg, pageParam }) => ({
         url: 'home/getStagedNotesBySpace',
         params: {
+          ...CARD_VIEW,
           userId: queryArg.userId,
           spaceId: queryArg.spaceId,
           limit: queryArg.limit ?? 10,
@@ -157,7 +163,7 @@ export const homeApi = api.injectEndpoints({
     getNoteById: builder.query<ApiNoteDetail, { noteId: string; spaceId: string }>({
       query: ({ noteId }) => ({
         url: 'home/getStagedNoteById',
-        params: { noteId },
+        params: { ...CARD_VIEW, noteId },
       }),
       transformResponse: (response: HomeApiEnvelope<ApiNoteDetail>) =>
         unwrapHomeData(response, 'Unable to load note'),
@@ -170,6 +176,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/create-space',
         method: 'POST',
+        params: CARD_VIEW,
         body: {
           userId: body.userId,
           spacename: body.spacename,
@@ -190,6 +197,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/startListning',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (
@@ -215,6 +223,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/create-staged-task',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
@@ -231,6 +240,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/create-staged-note',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
@@ -247,6 +257,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/update-space',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
@@ -271,6 +282,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ spaceId: _spaceId, ...body }) => ({
         url: 'home/update-staged-task',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
@@ -290,6 +302,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ spaceId: _spaceId, ...body }) => ({
         url: 'home/update-staged-note',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
@@ -300,6 +313,7 @@ export const homeApi = api.injectEndpoints({
       query: (body) => ({
         url: 'home/delete-space',
         method: 'POST',
+        params: CARD_VIEW,
         body,
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
@@ -324,6 +338,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ spaceId: _spaceId, taskId }) => ({
         url: 'home/delete-staged-task',
         method: 'POST',
+        params: CARD_VIEW,
         body: { taskId },
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
@@ -345,6 +360,7 @@ export const homeApi = api.injectEndpoints({
       query: ({ spaceId: _spaceId, noteId }) => ({
         url: 'home/delete-staged-note',
         method: 'POST',
+        params: CARD_VIEW,
         body: { noteId },
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string } | { message?: string; status?: number }>) => {
@@ -366,11 +382,31 @@ export const homeApi = api.injectEndpoints({
       query: ({ spaceId: _spaceId, taskId, done }) => ({
         url: 'home/set-staged-task-status',
         method: 'POST',
+        params: CARD_VIEW,
         body: { taskId, done },
       }),
       transformResponse: (response: HomeApiEnvelope<{ message?: string }>) =>
         unwrapHomeData(response, 'Unable to update task status'),
       invalidatesTags: (_result, _error, arg) => [{ type: 'SpaceTasks', id: arg.spaceId }],
+    }),
+    getGenerationDates: builder.query<
+      { dates: string[]; from: string; to: string },
+      { userId: string; spaceId: string; from: string; to: string }
+    >({
+      query: ({ userId, spaceId, from, to }) => ({
+        url: 'home/getGenerationDatesBySpace',
+        params: { userId, spaceId, from, to },
+      }),
+      transformResponse: (
+        response: HomeApiEnvelope<{ dates?: string[]; from?: string; to?: string }>,
+      ) => {
+        const payload = unwrapHomeData(response, 'Unable to load dates for this space');
+        return {
+          dates: Array.isArray(payload.dates) ? payload.dates : [],
+          from: payload.from || '',
+          to: payload.to || '',
+        };
+      },
     }),
     getProfileSummary: builder.query<
       ProfileSummary,
@@ -404,5 +440,6 @@ export const {
   useDeleteStagedTaskMutation,
   useDeleteStagedNoteMutation,
   useSetStagedTaskStatusMutation,
+  useGetGenerationDatesQuery,
   useGetProfileSummaryQuery,
 } = homeApi;

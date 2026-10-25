@@ -85,7 +85,16 @@ const unwrapMindmap = <T,>(response: MindmapEnvelope<T>, fallback: string): T =>
 
 export const mindmapApi = api.injectEndpoints({
   endpoints: (builder) => ({
-    generateMindmap: builder.mutation<GenerateMindmapResponse, { userId: string; spaceId: string }>({
+    generateMindmap: builder.mutation<
+      GenerateMindmapResponse,
+      {
+        userId: string;
+        spaceId: string;
+        scope?: 'space' | 'date';
+        dates?: string[];
+        timeZone?: string;
+      }
+    >({
       query: (body) => ({
         url: 'mindmap/generate',
         method: 'POST',
@@ -103,7 +112,7 @@ export const mindmapApi = api.injectEndpoints({
     listMindmaps: builder.query<MindmapSummary[], { userId: string; spaceId: string; limit?: number }>({
       query: ({ userId, spaceId, limit = 24 }) => ({
         url: 'mindmap/list',
-        params: { userId, spaceId, limit },
+        params: { view: 'card', userId, spaceId, limit },
       }),
       providesTags: (_result, _error, arg) => [
         { type: 'MindmapList', id: `${arg.userId}:${arg.spaceId}` },

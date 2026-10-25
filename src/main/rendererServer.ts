@@ -50,7 +50,8 @@ const resolveApiTarget = (pathname: string) => {
   if (
     pathname.startsWith('/api/v1/chat') ||
     pathname.startsWith('/api/v1/speech') ||
-    pathname.startsWith('/api/v1/mindmap')
+    pathname.startsWith('/api/v1/mindmap') ||
+    pathname.startsWith('/api/v1/documents')
   ) {
     return CHAT_API_TARGET;
   }

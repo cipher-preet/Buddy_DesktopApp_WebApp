@@ -30,6 +30,8 @@ export type MappedChatSessionDetail = {
   messages: ChatThreadMessage[];
 };
 
+const CARD_VIEW = { view: 'card' } as const;
+
 const unwrapChatData = <T,>(response: ChatApiEnvelope<T>, fallbackMessage: string): T => {
   if (!response?.success || response.data === undefined) {
     throw new Error(response?.message || response?.detail || fallbackMessage);
@@ -48,6 +50,7 @@ export const chatApi = api.injectEndpoints({
       query: ({ queryArg, pageParam }) => ({
         url: 'chat/sessions',
         params: {
+          ...CARD_VIEW,
           userId: queryArg.userId,
           limit: queryArg.limit ?? 20,
           ...(queryArg.spaceId ? { spaceId: queryArg.spaceId } : {}),
@@ -75,7 +78,7 @@ export const chatApi = api.injectEndpoints({
     getChatSessionById: builder.query<MappedChatSessionDetail, { userId: string; sessionId: string }>({
       query: ({ userId, sessionId }) => ({
         url: `chat/sessions/${sessionId}`,
-        params: { userId },
+        params: { ...CARD_VIEW, userId },
       }),
       transformResponse: (response: ChatApiEnvelope<ChatSessionDetailDto>) => {
         const payload = unwrapChatData(response, 'Unable to load chat');

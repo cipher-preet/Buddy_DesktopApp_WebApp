@@ -4,6 +4,11 @@ import '@xyflow/react/dist/style.css';
 import { FiChevronsLeft, FiFolder, FiSearch } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
+import {
+  SourceScopePicker,
+  generationRequestFields,
+  type GenerationScope,
+} from '@/components/common/SourceScopePicker';
 import { getStoredAuthToken } from '@/features/auth/authStorage';
 import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
@@ -39,34 +44,52 @@ type GenerationStatus = {
 const emptyGraph: MindmapGraphPayload = { nodes: [], edges: [] };
 
 const MindmapSpacePrompt = ({
+  userId,
+  spaceId,
+  scope,
+  onScopeChange,
   onView,
   onGenerate,
   viewBusy,
   generateBusy,
 }: {
+  userId?: string;
+  spaceId?: string;
+  scope: GenerationScope;
+  onScopeChange: (scope: GenerationScope) => void;
   onView: () => void;
   onGenerate: () => void;
   viewBusy?: boolean;
   generateBusy?: boolean;
 }) => (
   <div className="mindmap-prompt" role="region" aria-label="Mind map actions">
-    <div className="mindmap-prompt__actions">
-      <button
-        type="button"
-        className="mindmap-prompt__btn mindmap-prompt__btn--secondary"
-        onClick={onView}
+    <div className="mindmap-prompt__panel">
+      <SourceScopePicker
+        userId={userId}
+        spaceId={spaceId}
+        value={scope}
+        onChange={onScopeChange}
         disabled={viewBusy || generateBusy}
-      >
-        {viewBusy ? 'Loading…' : 'View mind map'}
-      </button>
-      <button
-        type="button"
-        className="mindmap-prompt__btn mindmap-prompt__btn--primary"
-        onClick={onGenerate}
-        disabled={generateBusy || viewBusy}
-      >
-        {generateBusy ? 'Starting…' : 'Generate mind map'}
-      </button>
+        variant="card"
+      />
+      <div className="mindmap-prompt__actions">
+        <button
+          type="button"
+          className="mindmap-prompt__btn mindmap-prompt__btn--secondary"
+          onClick={onView}
+          disabled={viewBusy || generateBusy}
+        >
+          {viewBusy ? 'Loading…' : 'View mind map'}
+        </button>
+        <button
+          type="button"
+          className="mindmap-prompt__btn mindmap-prompt__btn--primary"
+          onClick={onGenerate}
+          disabled={generateBusy || viewBusy || (scope.mode === 'date' && scope.dates.length === 0)}
+        >
+          {generateBusy ? 'Starting…' : 'Generate mind map'}
+        </button>
+      </div>
     </div>
   </div>
 );
@@ -113,6 +136,10 @@ export const MindmapPage = () => {
   const { handleApiError } = usePlanGate();
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('prompt');
+  const [generationScope, setGenerationScope] = useState<GenerationScope>({
+    mode: 'space',
+    dates: [],
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [query, setQuery] = useState('');
   const [viewGraph, setViewGraph] = useState<MindmapGraphPayload>(emptyGraph);
@@ -290,7 +317,11 @@ export const MindmapPage = () => {
     setCanvasMode('generate');
 
     try {
-      const result = await generateMindmap({ userId, spaceId: selectedSpace.id }).unwrap();
+      const result = await generateMindmap({
+        userId,
+        spaceId: selectedSpace.id,
+        ...generationRequestFields(generationScope),
+      }).unwrap();
       setGeneration({
         jobId: result.jobId,
         mindmapId: result.mindmapId,
@@ -342,7 +373,15 @@ export const MindmapPage = () => {
         error: message || 'Unable to start mind map generation',
       });
     }
-  }, [generateMindmap, handleApiError, handleStatusEvent, selectedSpace, stopGenerationStream, userId]);
+  }, [
+    generateMindmap,
+    generationScope,
+    handleApiError,
+    handleStatusEvent,
+    selectedSpace,
+    stopGenerationStream,
+    userId,
+  ]);
 
   const spacesErrorMessage =
     spacesError && typeof spacesError === 'object' && 'status' in spacesError
@@ -477,6 +516,10 @@ export const MindmapPage = () => {
         ) : canvasMode === 'prompt' ? (
           <>
             <MindmapSpacePrompt
+              userId={userId}
+              spaceId={selectedSpace.id}
+              scope={generationScope}
+              onScopeChange={setGenerationScope}
               onView={() => void handleView()}
               onGenerate={() => void handleGenerate()}
               viewBusy={isViewLoading}

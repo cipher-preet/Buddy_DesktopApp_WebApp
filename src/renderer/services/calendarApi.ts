@@ -38,7 +38,7 @@ export const calendarApi = api.injectEndpoints({
     >({
       query: ({ from, to }) => ({
         url: 'home/getCalendarFeed',
-        params: { from, to },
+        params: { view: 'card', from, to },
       }),
       transformResponse: (response: CalendarApiEnvelope<CalendarFeedDto>) => {
         const feed = unwrapCalendarData(response, 'Unable to load calendar');

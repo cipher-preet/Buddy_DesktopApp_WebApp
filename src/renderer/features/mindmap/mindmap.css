@@ -303,9 +303,33 @@
   display: grid;
   width: 100%;
   height: 100%;
+  min-height: 0;
   place-items: center;
-  padding: 24px;
+  padding: 12px;
+  overflow: auto;
   background: transparent;
+}
+
+.mindmap-prompt__panel {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(219px, 100%);
+  max-width: 100%;
+}
+
+.mindmap-prompt__panel .mindmap-prompt__actions {
+  flex-direction: column;
+  width: 100%;
+  gap: 6px;
+}
+
+.mindmap-prompt__panel .mindmap-prompt__btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 33px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .mindmap-prompt__actions {

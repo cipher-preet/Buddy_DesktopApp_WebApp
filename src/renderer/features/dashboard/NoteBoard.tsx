@@ -71,7 +71,6 @@ type NoteCardBodyProps = {
   note: WorkspaceNote;
 };
 
-/** Use list preview only — full body loads on edit, not per card. */
 const NoteCardBody = ({ note }: NoteCardBodyProps) => {
   const body = note.excerpt.trim();
 

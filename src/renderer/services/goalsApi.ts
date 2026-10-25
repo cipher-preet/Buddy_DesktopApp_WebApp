@@ -29,11 +29,17 @@ export type GoalPlanTask = {
 };
 
 export type GoalPlanDay = {
+  id?: string;
   dayIndex?: number;
   dateLabel?: string;
+  scheduledDate?: string;
   title: string;
   focus?: string;
+  category?: string;
+  minutes?: number;
   hours?: number | null;
+  status?: string;
+  notes?: string;
   tasks?: GoalPlanTask[];
   definitionOfDone?: string;
 };
@@ -190,6 +196,7 @@ export type GoalDashboard = {
     sourceType: string;
   }>;
   latestReview: { summary: string; periodType: string; focus: string } | null;
+  workspace?: GoalWorkspace | null;
   proposedRevision: { version: number; summary: string } | null;
   planSummary: string;
   progress?: {
@@ -197,6 +204,117 @@ export type GoalDashboard = {
     readiness?: { milestonesDone?: number; milestonesTotal?: number };
     achievement?: { achieved?: boolean; label?: string };
   };
+};
+
+export type GoalWorkspaceStep = {
+  id: string;
+  dayIndex: number;
+  date: string;
+  dateLabel: string;
+  title: string;
+  category: string;
+  minutes: number;
+  example?: boolean;
+  status: 'open' | 'done' | 'skipped' | 'today' | 'overdue' | string;
+  checklist: Array<{ id: string; text: string; done: boolean; why?: string; definitionOfDone?: string }>;
+  checklistDone: number;
+  checklistTotal: number;
+  why: string;
+  outcome: string;
+  doneWhen: string;
+  notes: string;
+  partOf: string;
+  overdueDays: number;
+};
+
+export type GoalWorkspace = {
+  title: string;
+  status: string;
+  startedOn: string;
+  startedLabel: string;
+  endsOn: string;
+  endsLabel: string;
+  dayNumber: number;
+  horizonDays: number;
+  stepsDone: number;
+  stepsTotal: number;
+  daysLeft: number;
+  progressPercent: number;
+  pace: 'on_track' | 'at_risk' | 'achieved' | string;
+  paceLabel: string;
+  achieved: boolean;
+  finishedEarlyDays: number | null;
+  today: string;
+  metric: {
+    label: string;
+    current: number | null;
+    target: number | null;
+    todayTarget: number | null;
+    lastLogged: number | null;
+    lastLoggedOn: string | null;
+    lastLoggedLabel: string;
+    streak: number;
+  };
+  chart: Array<{ day: number; label: string; date: string; real: number | null; target: number | null }>;
+  coach: {
+    status: 'ready' | 'thinking' | string;
+    text: string;
+    evidence: Array<{ id: string; label: string; kind: string; dateLabel: string; example?: boolean }>;
+  };
+  todayStep: GoalWorkspaceStep | null;
+  attention: GoalWorkspaceStep[];
+  weeks: Array<{
+    id: string;
+    label: string;
+    rangeLabel: string;
+    flag: string;
+    done: number;
+    total: number;
+    expanded: boolean;
+    steps: GoalWorkspaceStep[];
+  }>;
+  strategies: Array<{
+    id: string;
+    title: string;
+    body: string;
+    overview: string;
+    done: number;
+    total: number;
+    percent: number;
+    active: boolean;
+    windowLabel: string;
+    linkedSteps: Array<{ id: string; title: string; dayLabel: string; done: boolean }>;
+  }>;
+  recommendations: Array<{
+    id: string;
+    title: string;
+    reason: string;
+    windowLabel: string;
+    howSteps: string[];
+    category: string;
+    added: boolean;
+    related: Array<{ id: string; label: string; done: boolean }>;
+  }>;
+  checkIn: {
+    weekLabel: string;
+    headline: string;
+    stepsDone: number;
+    stepsTotal: number;
+    usersCurrent: number | null;
+    usersTarget: number | null;
+    pacePercent: number | null;
+    notesAdded: number;
+    completed: Array<{ id: string; title: string; doneOn: string; overdue: boolean; done: boolean }>;
+    adjustments: Array<{ id: string; title: string; reason: string; selected: boolean; kind: string }>;
+    reflection: string;
+  } | null;
+  recovery: {
+    riskLabel: string;
+    title: string;
+    summary: string;
+    actions: Array<{ id: string; title: string; detail: string; example?: boolean }>;
+    projection: string;
+  } | null;
 };
 
 export type GoalSummary = {
@@ -331,6 +449,29 @@ export const goalsApi = api.injectEndpoints({
         { type: 'Goals', id: 'LIST' },
       ],
     }),
+    goalWorkspaceAction: builder.mutation<
+      GoalDashboard,
+      {
+        goalId: string;
+        action: 'complete' | 'reopen' | 'note' | 'reschedule' | 'apply_recommendation' | 'apply_checkin';
+        stepId?: string;
+        date?: string;
+        note?: string;
+        mode?: 'move' | 'skip' | 'split' | string;
+        recommendationId?: string;
+        adjustmentIds?: string[];
+        reflection?: string;
+      }
+    >({
+      query: ({ goalId, ...body }) => ({
+        url: `goals/${goalId}/workspace/actions`,
+        method: 'POST',
+        body,
+      }),
+      transformResponse: (response: Envelope<{ dashboard: GoalDashboard }>) =>
+        unwrap(response, 'Unable to update this goal').dashboard,
+      invalidatesTags: (_result, _error, arg) => [{ type: 'Goals', id: arg.goalId }, { type: 'Goals', id: 'LIST' }],
+    }),
     toggleGoalPlanItem: builder.mutation<
       GoalDashboard,
       {
@@ -369,5 +510,6 @@ export const {
   usePauseGoalMutation,
   useApproveGoalRevisionMutation,
   useToggleGoalPlanItemMutation,
+  useGoalWorkspaceActionMutation,
   useDeleteGoalMutation,
 } = goalsApi;

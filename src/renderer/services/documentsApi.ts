@@ -89,7 +89,14 @@ export const documentsApi = api.injectEndpoints({
   endpoints: (builder) => ({
     generateDocument: builder.mutation<
       GenerateDocumentResponse,
-      { userId: string; spaceId: string; templateCode: string }
+      {
+        userId: string;
+        spaceId: string;
+        templateCode: string;
+        scope?: 'space' | 'date';
+        dates?: string[];
+        timeZone?: string;
+      }
     >({
       query: (body) => ({
         url: 'documents/generate',
@@ -103,7 +110,7 @@ export const documentsApi = api.injectEndpoints({
     >({
       query: ({ userId, spaceId, limit = 24 }) => ({
         url: 'documents/list',
-        params: { userId, spaceId, limit },
+        params: { view: 'card', userId, spaceId, limit },
       }),
       providesTags: (_result, _error, arg) => [
         { type: 'SpaceDocuments', id: `${arg.userId}:${arg.spaceId}` },
