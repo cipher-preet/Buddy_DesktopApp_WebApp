@@ -25,6 +25,7 @@ type SpaceMindmapSectionProps = {
   userId: string;
   spaceId: string;
   spaceName: string;
+  readOnly?: boolean;
 };
 
 const toneClass = (tone?: string | null) => (tone ? `mindmap-node--${tone}` : '');
@@ -133,11 +134,13 @@ const MindmapDetailView = ({
   mindmapId,
   spaceName,
   title,
+  readOnly = false,
   onBack,
 }: {
   mindmapId: string;
   spaceName: string;
   title: string;
+  readOnly?: boolean;
   onBack: () => void;
 }) => {
   const canvasShellRef = useRef<HTMLDivElement>(null);
@@ -227,7 +230,7 @@ const MindmapDetailView = ({
 
         {!isLoading && !isError && data ? (
           <ReactFlowProvider>
-            <MindmapCanvas canvasKey={mindmapId} mindmapId={mindmapId} graph={graph} />
+            <MindmapCanvas canvasKey={mindmapId} mindmapId={mindmapId} graph={graph} readOnly={readOnly} />
           </ReactFlowProvider>
         ) : null}
 
@@ -249,15 +252,16 @@ const MindmapDetailView = ({
   );
 };
 
-export const SpaceMindmapSection = ({ userId, spaceId, spaceName }: SpaceMindmapSectionProps) => {
+export const SpaceMindmapSection = ({ userId, spaceId, spaceName, readOnly = false }: SpaceMindmapSectionProps) => {
   const [selected, setSelected] = useState<MindmapSummary | null>(null);
 
-  const { data, isLoading, isError, error, refetch } = useListMindmapsQuery(
+  const { currentData, isLoading, isFetching, isUninitialized, isError, error, refetch } = useListMindmapsQuery(
     { userId, spaceId, limit: 24 },
     { skip: !userId || !spaceId },
   );
 
-  const mindmaps = data ?? [];
+  const mindmaps = currentData ?? [];
+  const mindmapsPending = !currentData && !isError && (isLoading || isFetching || isUninitialized);
 
   useEffect(() => {
     setSelected(null);
@@ -269,6 +273,7 @@ export const SpaceMindmapSection = ({ userId, spaceId, spaceName }: SpaceMindmap
         mindmapId={selected.mindmapId}
         spaceName={spaceName}
         title={selected.preview?.title || `Version ${selected.version ?? ''}`}
+        readOnly={readOnly}
         onBack={() => setSelected(null)}
       />
     );
@@ -281,7 +286,7 @@ export const SpaceMindmapSection = ({ userId, spaceId, spaceName }: SpaceMindmap
 
   return (
     <section className="home-mindmaps" aria-label="Space mind maps">
-      {isLoading && mindmaps.length === 0 ? (
+      {mindmapsPending ? (
         <div className="home-empty-state">
           <span className="home-empty-state__icon">
             <FiGitBranch aria-hidden="true" size={20} />
@@ -291,7 +296,7 @@ export const SpaceMindmapSection = ({ userId, spaceId, spaceName }: SpaceMindmap
         </div>
       ) : null}
 
-      {isError && mindmaps.length === 0 ? (
+      {isError && !mindmapsPending ? (
         <div className="home-empty-state">
           <span className="home-empty-state__icon">
             <FiGitBranch aria-hidden="true" size={20} />
@@ -305,7 +310,7 @@ export const SpaceMindmapSection = ({ userId, spaceId, spaceName }: SpaceMindmap
         </div>
       ) : null}
 
-      {!isLoading && !isError && mindmaps.length === 0 ? (
+      {!mindmapsPending && !isError && mindmaps.length === 0 ? (
         <div className="home-empty-state">
           <span className="home-empty-state__icon">
             <FiGitBranch aria-hidden="true" size={20} />

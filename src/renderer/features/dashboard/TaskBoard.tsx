@@ -9,6 +9,7 @@ import {
 
 import { groupItemsByDate } from './homeMappers';
 import { ItemActionsMenu } from './ItemActionsMenu';
+import { TeamTag } from './TeamTag';
 import type { WorkspaceTask } from './homeTypes';
 
 export type TaskFilter = 'all' | 'open' | 'done';
@@ -19,6 +20,8 @@ type TaskBoardProps = {
   completedTaskIds: Set<string>;
   openItemMenuId: string | null;
   searchHitId: string | null;
+  readOnly?: boolean;
+  senderName?: string;
   onToggle: (taskId: string) => void;
   onMenuChange: (menuId: string | null) => void;
   onEdit: (task: WorkspaceTask) => void;
@@ -31,6 +34,8 @@ export const TaskBoard = ({
   completedTaskIds,
   openItemMenuId,
   searchHitId,
+  readOnly = false,
+  senderName,
   onToggle,
   onMenuChange,
   onEdit,
@@ -91,7 +96,12 @@ export const TaskBoard = ({
                       className="task-card__toggle"
                       aria-label={`Mark ${task.title} ${isDone ? 'open' : 'done'}`}
                     >
-                      <input type="checkbox" checked={isDone} onChange={() => onToggle(task.id)} />
+                      <input
+                        type="checkbox"
+                        checked={isDone}
+                        disabled={readOnly}
+                        onChange={() => onToggle(task.id)}
+                      />
                       <span>
                         <FiCheck aria-hidden="true" size={12} strokeWidth={3} />
                       </span>
@@ -117,6 +127,9 @@ export const TaskBoard = ({
                     </div>
 
                     <div className="task-card__aside">
+                      {readOnly ? (
+                        <TeamTag senderName={senderName} />
+                      ) : (
                       <ItemActionsMenu
                         itemLabel={task.title}
                         isOpen={isMenuOpen}
@@ -131,6 +144,7 @@ export const TaskBoard = ({
                           onDelete(task);
                         }}
                       />
+                      )}
                     </div>
                   </article>
                 );

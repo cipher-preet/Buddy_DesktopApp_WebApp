@@ -38,6 +38,7 @@ export type ApiMeetingListItem = {
   processingStatus?: string | null;
   videoMergeStatus?: string | null;
   ready?: boolean;
+  shared?: boolean;
 };
 
 export type ApiMeetingArtifacts = {
@@ -154,6 +155,7 @@ export type MeetingListItem = {
   statusLabel: string;
   thumbnailTone: MeetingThumbnailTone;
   coverImage: string;
+  shared: boolean;
 };
 
 export type MeetingDetailShell = MeetingListItem & {

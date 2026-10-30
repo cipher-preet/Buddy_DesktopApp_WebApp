@@ -82,6 +82,15 @@ export type GoalStep = {
   strategies?: GoalPlanStrategy[];
   checklists?: GoalPlanChecklist[];
   scorecard?: Array<{ area: string; criteria: string }>;
+  note?: string;
+  brief?: string[];
+  realityCheck?: string;
+  primaryFocus?: string;
+  secondaryFocus?: string;
+  starter?: string;
+  assumptions?: string[];
+  resourceSplit?: Array<{ item: string; amount: string }>;
+  openQuestions?: Array<{ id?: string; prompt: string; options?: GoalStepOption[] }>;
 };
 
 export type GoalPlan = {

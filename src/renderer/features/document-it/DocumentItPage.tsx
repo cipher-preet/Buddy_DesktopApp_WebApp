@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FiCalendar,
   FiCheckSquare,
@@ -30,6 +30,7 @@ type DocumentItPageProps = {
   embedded?: boolean;
   spaceId?: string;
   spaceName?: string;
+  readUserId?: string;
 };
 
 export const templateIcons: Record<string, IconType> = {
@@ -168,9 +169,10 @@ const GeneratedDocumentCard = ({
   );
 };
 
-export const DocumentItPage = ({ embedded = false, spaceId, spaceName }: DocumentItPageProps) => {
+export const DocumentItPage = ({ embedded = false, spaceId, spaceName, readUserId }: DocumentItPageProps) => {
   const { showToast } = useToast();
   const userId = useAppSelector((state) => state.auth.user?.userId || '');
+  const listUserId = readUserId || userId;
   const [selectedTemplate, setSelectedTemplate] = useState<DocumentTemplate | null>(null);
   const [previewDocument, setPreviewDocument] = useState<SpaceDocument | null>(null);
   const showTemplates = !embedded;
@@ -184,19 +186,30 @@ export const DocumentItPage = ({ embedded = false, spaceId, spaceName }: Documen
   } = useGetDocumentTemplatesQuery(undefined, { skip: !showTemplates });
 
   const {
-    data: generatedDocuments = [],
+    currentData: generatedDocuments,
     isLoading: isDocsLoading,
+    isFetching: isDocsFetching,
     isError: isDocsError,
+    isUninitialized: isDocsUninitialized,
     refetch: refetchDocs,
   } = useListDocumentsQuery(
-    { userId, spaceId: spaceId || '', limit: 24 },
-    { skip: !userId || !spaceId },
+    { userId: listUserId, spaceId: spaceId || '', limit: 24 },
+    { skip: !listUserId || !spaceId },
   );
 
   const readyDocuments = useMemo(
-    () => generatedDocuments.filter((doc) => doc.status === 'READY'),
+    () => (generatedDocuments ?? []).filter((doc) => doc.status === 'READY'),
     [generatedDocuments],
   );
+  const docsPending =
+    Boolean(spaceId && listUserId) &&
+    generatedDocuments === undefined &&
+    !isDocsError &&
+    (isDocsLoading || isDocsFetching || isDocsUninitialized);
+
+  useEffect(() => {
+    setPreviewDocument(null);
+  }, [spaceId]);
 
   if (selectedTemplate) {
     const Icon = templateIcons[selectedTemplate.id] ?? FiFileText;
@@ -249,14 +262,14 @@ export const DocumentItPage = ({ embedded = false, spaceId, spaceName }: Documen
 
       {spaceId ? (
         <div className="document-generated">
-          {isDocsLoading ? (
+          {docsPending ? (
             <div className="document-templates__state" aria-busy="true">
               <span className="home-spinner" />
               <p>Loading documents…</p>
             </div>
           ) : null}
 
-          {isDocsError && !isDocsLoading ? (
+          {isDocsError && !docsPending ? (
             <div className="document-templates__state" role="alert">
               <p>Unable to load generated documents</p>
               <button type="button" className="home-retry-button" onClick={() => void refetchDocs()}>
@@ -265,14 +278,14 @@ export const DocumentItPage = ({ embedded = false, spaceId, spaceName }: Documen
             </div>
           ) : null}
 
-          {!isDocsLoading && !isDocsError && readyDocuments.length === 0 ? (
+          {!docsPending && !isDocsError && readyDocuments.length === 0 ? (
             <div className="document-templates__state document-templates__state--compact">
               <p>No generated documents yet</p>
               <span>Open Document it, pick a template, then generate for this space.</span>
             </div>
           ) : null}
 
-          {!isDocsLoading && !isDocsError && readyDocuments.length > 0 ? (
+          {!docsPending && !isDocsError && readyDocuments.length > 0 ? (
             <div className="document-generated__grid">
               {readyDocuments.map((doc) => (
                 <GeneratedDocumentCard

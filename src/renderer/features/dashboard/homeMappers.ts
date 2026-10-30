@@ -201,6 +201,10 @@ export const mapSpace = (space: ApiSpace): WorkspaceSpace => ({
   tasksCount: space.tasksCount ?? 0,
   notesCount: space.notesCount ?? 0,
   updatedAtLabel: formatRelativeDate(space.updatedAt || space.createdAt),
+  shared: Boolean(space.shared),
+  access: space.access === 'view' ? 'view' : 'owner',
+  ownerUserId: space.ownerUserId || space.userId || '',
+  sharedByName: space.sharedByName || '',
 });
 
 const mapPriority = (priority?: string | null): WorkspaceTask['priority'] => {

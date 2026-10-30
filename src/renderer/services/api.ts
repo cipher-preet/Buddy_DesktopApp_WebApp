@@ -221,6 +221,8 @@ export const api = createApi({
     'MarketplaceAgents',
     'SpaceDocuments',
     'Goals',
+    'TeamPeople',
+    'TeamInvitations',
   ],
   endpoints: (builder) => ({
     getHealth: builder.query<HealthResponse, void>({

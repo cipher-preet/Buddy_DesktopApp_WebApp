@@ -108,7 +108,11 @@ export const DocumentTemplateDetail = ({
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [spaceQuery, setSpaceQuery] = useState('');
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(initialSpaceId || null);
-  const [confirmedSpace, setConfirmedSpace] = useState<{ id: string; name: string } | null>(
+  const [confirmedSpace, setConfirmedSpace] = useState<{
+    id: string;
+    name: string;
+    shared?: boolean;
+  } | null>(
     initialSpaceId && initialSpaceName ? { id: initialSpaceId, name: initialSpaceName } : null,
   );
   const [pickerStyle, setPickerStyle] = useState<CSSProperties>({});
@@ -254,7 +258,7 @@ export const DocumentTemplateDetail = ({
     }
     const match = spaces.find((space) => space.id === selectedSpaceId);
     const name = match?.name ?? confirmedSpace?.name ?? 'Selected space';
-    setConfirmedSpace({ id: selectedSpaceId, name });
+    setConfirmedSpace({ id: selectedSpaceId, name, shared: Boolean(match?.shared) });
     setIsPickerOpen(false);
     setSpaceQuery('');
   };
@@ -310,6 +314,14 @@ export const DocumentTemplateDetail = ({
     }
     if (!confirmedSpace) {
       showToast({ message: 'Select one space first.', type: 'error' });
+      return;
+    }
+    if (confirmedSpace.shared) {
+      showToast({
+        message: 'This space is view only.',
+        description: 'You can see shared documents, but you cannot create new ones.',
+        type: 'error',
+      });
       return;
     }
     if (isGenerating || isStartingGenerate) {

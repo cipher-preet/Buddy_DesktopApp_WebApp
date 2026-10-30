@@ -18,6 +18,7 @@ import {
 
 import { useAppSelector } from '@/app/hooks';
 import type { WorkspaceSpace } from '@/features/dashboard/homeTypes';
+import { TeamTag } from '@/features/dashboard/TeamTag';
 import type { MeetingDetailTab, MeetingFocusTarget } from '@/features/search/searchTypes';
 import { getApiErrorMessage as getErrorMessage } from '@/services/apiErrors';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
@@ -865,7 +866,10 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                     <FiFolder size={16} />
                   </span>
                   <span className="meetings-space-card__body">
-                    <strong>{space.name}</strong>
+                    <strong className="space-card-title">
+                      <span className="space-card-title__name">{space.name}</span>
+                      {space.shared ? <TeamTag senderName={space.sharedByName} /> : null}
+                    </strong>
                     <span>{space.description || 'No description'}</span>
                     <span className="meetings-space-card__meta">
                       {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} ·{' '}
@@ -982,6 +986,9 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                   ? spaces.find((space) => space.id === selectedSpaceId)?.name
                   : null);
 
+              const senderName =
+                spaces.find((space) => space.id === (selectedSpaceId ?? meeting.spaceId))?.sharedByName || '';
+
               return (
                 <article
                   key={meeting.id}
@@ -995,6 +1002,7 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                     <MeetingThumbnail meeting={meeting} />
                   </button>
 
+                  {meeting.shared ? null : (
                   <button
                     type="button"
                     className="meeting-card__delete"
@@ -1012,6 +1020,7 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                   >
                     <FiTrash2 aria-hidden="true" size={15} />
                   </button>
+                  )}
 
                   <div className="meeting-card__bottom">
                     <button
@@ -1021,7 +1030,10 @@ export const MeetingsPage = ({ focusTarget = null, onFocusTargetHandled }: Meeti
                     >
                       <div className="meeting-card__body">
                         <div className="meeting-card__title-row">
-                          <h2>{meeting.title}</h2>
+                          <h2>
+                            {meeting.title}
+                            {meeting.shared ? <TeamTag senderName={senderName} /> : null}
+                          </h2>
                           {spaceName ? (
                             <span className="meeting-card__space-count" title={spaceName}>
                               <FiFolder aria-hidden="true" size={11} />

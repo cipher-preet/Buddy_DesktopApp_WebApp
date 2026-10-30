@@ -187,8 +187,8 @@ export const mapMeetingListItem = (item: ApiMeetingListItem): MeetingListItem =>
     recordingStatus: String(item.recordingStatus || ''),
     statusLabel: statusLabel(item.recordingStatus, item.ready),
     thumbnailTone: THUMBNAIL_TONES[toneIndex],
-    // Prefer a real frame from the recording; fall back to hashed placeholder art.
     coverImage: String(item.thumbnailUrl || '').trim() || COVER_IMAGES[coverIndex],
+    shared: Boolean(item.shared),
   };
 };
 

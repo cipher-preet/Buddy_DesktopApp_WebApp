@@ -3,6 +3,7 @@ import { FiCalendar, FiFileText } from 'react-icons/fi';
 
 import { groupItemsByDate } from './homeMappers';
 import { ItemActionsMenu } from './ItemActionsMenu';
+import { TeamTag } from './TeamTag';
 import type { WorkspaceNote } from './homeTypes';
 
 export type NoteLayout = 'grid' | 'list';
@@ -87,6 +88,8 @@ type NoteBoardProps = {
   layout: NoteLayout;
   openItemMenuId: string | null;
   searchHitId: string | null;
+  readOnly?: boolean;
+  senderName?: string;
   onMenuChange: (menuId: string | null) => void;
   onEdit: (note: WorkspaceNote) => void;
   onDelete: (note: WorkspaceNote) => void;
@@ -98,6 +101,8 @@ export const NoteBoard = ({
   layout,
   openItemMenuId,
   searchHitId,
+  readOnly = false,
+  senderName,
   onMenuChange,
   onEdit,
   onDelete,
@@ -134,6 +139,9 @@ export const NoteBoard = ({
                     </span>
                     <h3>{note.title}</h3>
                     <div className="note-card__actions">
+                      {readOnly ? (
+                        <TeamTag senderName={senderName} />
+                      ) : (
                       <ItemActionsMenu
                         itemLabel={note.title}
                         isOpen={isMenuOpen}
@@ -148,6 +156,7 @@ export const NoteBoard = ({
                           onDelete(note);
                         }}
                       />
+                      )}
                     </div>
                   </header>
                   <NoteCardBody note={note} />

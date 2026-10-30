@@ -206,7 +206,13 @@
   font-weight: 600;
 }
 .gw-coach { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding-top: 12px; color: #3a4150; font-size: 13.5px; line-height: 1.5; }
-.gw-coach p { margin: 0; }
+.gw-coach p {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .gw-evidence {
   display: flex;
   flex-direction: column;
@@ -577,6 +583,29 @@
   line-height: 1.45;
   resize: vertical;
   box-sizing: border-box;
+}
+.gw-step-date {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 6px;
+}
+.gw-step-date p {
+  margin: 0;
+  color: #4d6fd4;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gw-check-block { margin-top: 16px; }
+.gw-notes-label {
+  display: block;
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--gw-muted);
 }
 .gw-grid-2 { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 16px; align-items: start; }
 .gw-section-label { display: flex; justify-content: space-between; margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #98a0ad; }

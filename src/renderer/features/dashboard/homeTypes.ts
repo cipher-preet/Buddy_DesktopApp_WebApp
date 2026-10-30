@@ -16,6 +16,10 @@ export type ApiSpace = {
   updatedAt?: string;
   tasksCount?: number;
   notesCount?: number;
+  shared?: boolean;
+  access?: 'owner' | 'view';
+  ownerUserId?: string;
+  sharedByName?: string;
 };
 
 export type ApiNoteCard = {
@@ -71,6 +75,10 @@ export type WorkspaceSpace = {
   tasksCount: number;
   notesCount: number;
   updatedAtLabel: string;
+  shared: boolean;
+  access: 'owner' | 'view';
+  ownerUserId: string;
+  sharedByName: string;
 };
 
 export type WorkspaceTask = {

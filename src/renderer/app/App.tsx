@@ -9,6 +9,7 @@ import {
   FiSettings,
   FiShoppingBag,
   FiTarget,
+  FiUsers,
   FiVideo,
 } from 'react-icons/fi';
 import { RiRobot2Line } from 'react-icons/ri';
@@ -37,6 +38,8 @@ import { MeetingsPage } from '@/features/meetings/MeetingsPage';
 import { MindmapPage } from '@/features/mindmap/MindmapPage';
 import { PlanGateProvider } from '@/features/settings/PlanGateProvider';
 import { SettingsPage } from '@/features/settings/SettingsPage';
+import { TeamsPage } from '@/features/teams/TeamsPage';
+import { InvitePage } from '@/features/teams/InvitePage';
 import type {
   CalendarFocusTarget,
   DashboardFocusTarget,
@@ -55,6 +58,7 @@ type AppRoute =
   | 'calendar'
   | 'integrations'
   | 'marketplace'
+  | 'teams'
   | 'settings'
   | 'documentation';
 
@@ -68,6 +72,7 @@ const APP_ROUTES: readonly AppRoute[] = [
   'calendar',
   'integrations',
   'marketplace',
+  'teams',
   'settings',
   'documentation',
 ] as const;
@@ -81,6 +86,22 @@ const readRouteFromHash = (): AppRoute => {
   }
   const raw = window.location.hash.replace(/^#\/?/, '').split(/[/?#]/)[0] ?? '';
   return isAppRoute(raw) ? raw : 'home';
+};
+
+const readInviteToken = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const raw = window.location.hash.replace(/^#\/?/, '');
+  const [route, token] = raw.split(/[/?#]/);
+  if (route !== 'invite' || !token) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(token);
+  } catch {
+    return token;
+  }
 };
 
 const writeRouteToHash = (route: AppRoute) => {
@@ -108,6 +129,8 @@ export const App = () => {
   const [meetingTarget, setMeetingTarget] = useState<MeetingFocusTarget | null>(null);
   const [calendarTarget, setCalendarTarget] = useState<CalendarFocusTarget | null>(null);
   const [checkAuth] = useLazyCheckAuthQuery();
+  const [inviteToken, setInviteToken] = useState<string | null>(() => readInviteToken());
+  const [inviteNeedsAuth, setInviteNeedsAuth] = useState(false);
 
   const setActiveRoute = (route: AppRoute) => {
     setActiveRouteState(route);
@@ -115,9 +138,17 @@ export const App = () => {
   };
 
   useEffect(() => {
-    writeRouteToHash(activeRoute);
+    if (!readInviteToken()) {
+      writeRouteToHash(activeRoute);
+    }
 
     const handleHashChange = () => {
+      const nextToken = readInviteToken();
+      setInviteToken(nextToken);
+      if (nextToken) {
+        setInviteNeedsAuth(false);
+        return;
+      }
       const nextRoute = readRouteFromHash();
       setActiveRouteState((current) => (current === nextRoute ? current : nextRoute));
     };
@@ -126,7 +157,7 @@ export const App = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
     // Sync listener once; route writes go through setActiveRoute.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeRoute]);
 
   const handleSearchNavigate = (target: SearchNavigationTarget) => {
     const nonce = Date.now();
@@ -166,8 +197,10 @@ export const App = () => {
 
       if (!session?.token || !session.user?.userId) {
         if (!cancelled) {
+          // The cache is already empty on a fresh visit. Resetting it here runs
+          // again under Strict Mode after the invite page has subscribed, which
+          // drops that request and leaves the page on "Loading invitation".
           dispatch(setUnauthenticated());
-          dispatch(api.util.resetApiState());
         }
         return;
       }
@@ -261,6 +294,12 @@ export const App = () => {
       badge: 'Beta',
     },
     {
+      label: 'Teams',
+      icon: FiUsers,
+      isActive: activeRoute === 'teams',
+      onSelect: () => setActiveRoute('teams'),
+    },
+    {
       label: 'Settings',
       icon: FiSettings,
       isActive: activeRoute === 'settings',
@@ -279,6 +318,31 @@ export const App = () => {
       <div className="app-boot-screen" role="status" aria-live="polite">
         <p>Connecting to KukuNotes…</p>
       </div>
+    );
+  }
+
+  if (inviteToken) {
+    if (authStatus !== 'authenticated' && inviteNeedsAuth) {
+      return (
+        <AuthPage
+          onAuthenticated={() => {
+            setInviteNeedsAuth(false);
+          }}
+        />
+      );
+    }
+    return (
+      <InvitePage
+        token={inviteToken}
+        isAuthenticated={authStatus === 'authenticated'}
+        onRequireAuth={() => setInviteNeedsAuth(true)}
+        onOpenDashboard={() => {
+          setInviteToken(null);
+          setInviteNeedsAuth(false);
+          setHomeSectionFocus(null);
+          setActiveRoute('home');
+        }}
+      />
     );
   }
 
@@ -310,6 +374,7 @@ export const App = () => {
     calendar: <CalendarPage focusTarget={calendarTarget} onFocusTargetHandled={() => setCalendarTarget(null)} />,
     integrations: <IntegrationsPage />,
     marketplace: <MarketplacePage />,
+    teams: <TeamsPage />,
     settings: (
       <SettingsPage
         focusSection={settingsFocus}

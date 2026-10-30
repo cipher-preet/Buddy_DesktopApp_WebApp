@@ -41,6 +41,7 @@ import { ItemActionsMenu } from './ItemActionsMenu';
 import type { WorkspaceNote, WorkspaceSpace, WorkspaceTask } from './homeTypes';
 import { NoteBoard, type NoteLayout } from './NoteBoard';
 import { TaskBoard, type TaskFilter } from './TaskBoard';
+import { TeamTag } from './TeamTag';
 import { TaskFilterMenu } from './TaskFilterMenu';
 import {
   ConfirmDeleteModal,
@@ -197,10 +198,11 @@ export const DashboardPage = ({
   const shouldLoadNotes = Boolean(userId && selectedSpace?.id && activeSection === 'notes');
 
   const {
-    data: tasksData,
+    currentData: tasksData,
     isLoading: isTasksLoading,
     isFetching: isTasksFetching,
     isError: isTasksError,
+    isUninitialized: isTasksUninitialized,
     error: tasksError,
     refetch: refetchTasks,
     fetchNextPage: fetchNextTasksPage,
@@ -216,10 +218,11 @@ export const DashboardPage = ({
   );
 
   const {
-    data: notesData,
+    currentData: notesData,
     isLoading: isNotesLoading,
     isFetching: isNotesFetching,
     isError: isNotesError,
+    isUninitialized: isNotesUninitialized,
     error: notesError,
     refetch: refetchNotes,
     fetchNextPage: fetchNextNotesPage,
@@ -310,7 +313,8 @@ export const DashboardPage = ({
     }
     const isFetching = isTasks ? isTasksFetching : isNotesFetching;
     const isLoading = isTasks ? isTasksLoading : isNotesLoading;
-    if (isFetching || isLoading) {
+    const isWaiting = isTasks ? isTasksUninitialized : isNotesUninitialized;
+    if (isFetching || isLoading || isWaiting) {
       return;
     }
     const loads = focusLoadsRef.current;
@@ -340,8 +344,10 @@ export const DashboardPage = ({
     hasMoreTasks,
     isNotesFetching,
     isNotesLoading,
+    isNotesUninitialized,
     isTasksFetching,
     isTasksLoading,
+    isTasksUninitialized,
     notes,
     pendingFocus,
     refetchNotes,
@@ -731,8 +737,10 @@ export const DashboardPage = ({
   const tasksErrorMessage = getErrorMessage(tasksError, 'Unable to load tasks');
   const notesErrorMessage = getErrorMessage(notesError, 'Unable to load notes');
 
-  const showTasksInitialLoading = shouldLoadTasks && isTasksLoading && tasks.length === 0;
-  const showNotesInitialLoading = shouldLoadNotes && isNotesLoading && notes.length === 0;
+  const showTasksInitialLoading =
+    shouldLoadTasks && !tasksData && !isTasksError && (isTasksLoading || isTasksFetching || isTasksUninitialized);
+  const showNotesInitialLoading =
+    shouldLoadNotes && !notesData && !isNotesError && (isNotesLoading || isNotesFetching || isNotesUninitialized);
 
   return (
     <>
@@ -796,7 +804,7 @@ export const DashboardPage = ({
                 <button
                   className="space-item__select"
                   type="button"
-                  title={space.name}
+                  title={space.shared ? undefined : space.name}
                   onClick={() => {
                     setSelectedSpaceId(space.id);
                     setOpenItemMenuId(null);
@@ -806,13 +814,17 @@ export const DashboardPage = ({
                     <FiFolder aria-hidden="true" size={17} />
                   </span>
                   <span className="space-item__content">
-                    <strong>{space.name}</strong>
+                    <strong className="space-card-title">
+                      <span className="space-card-title__name">{space.name}</span>
+                      {space.shared ? <TeamTag senderName={space.sharedByName} /> : null}
+                    </strong>
                     <small>
                       {space.tasksCount} {space.tasksCount === 1 ? 'task' : 'tasks'} ·{' '}
                       {space.notesCount} {space.notesCount === 1 ? 'note' : 'notes'}
                     </small>
                   </span>
                 </button>
+                {space.shared ? null : (
                 <ItemActionsMenu
                   itemLabel={space.name}
                   isOpen={isMenuOpen}
@@ -827,6 +839,7 @@ export const DashboardPage = ({
                     setDeleteTarget({ kind: 'space', id: space.id, label: space.name });
                   }}
                 />
+                )}
               </div>
             );
           })}
@@ -865,7 +878,10 @@ export const DashboardPage = ({
                   <FiFolder aria-hidden="true" size={20} />
                 </span>
                 <div className="space-hero__text">
-                  <h2>{selectedSpace.name}</h2>
+                  <h2 className="space-card-title">
+                    <span className="space-card-title__name">{selectedSpace.name}</span>
+                    {selectedSpace.shared ? <TeamTag senderName={selectedSpace.sharedByName} /> : null}
+                  </h2>
                   <p>
                     {selectedSpace.description && selectedSpace.description !== 'New'
                       ? selectedSpace.description
@@ -1004,6 +1020,9 @@ export const DashboardPage = ({
                 ) : null}
 
                 {activeSection === 'tasks' || activeSection === 'notes' ? (
+                  selectedSpace.shared ? (
+                    <span className="view-only-pill">View only</span>
+                  ) : (
                   <button
                     className="home-create-button"
                     type="button"
@@ -1012,6 +1031,7 @@ export const DashboardPage = ({
                     <FiPlus aria-hidden="true" size={15} />
                     <span>{activeSection === 'tasks' ? 'New task' : 'New note'}</span>
                   </button>
+                  )
                 ) : null}
               </div>
             </div>
@@ -1045,10 +1065,12 @@ export const DashboardPage = ({
                       </span>
                       <h3>No tasks yet</h3>
                       <p>Create a task to track work inside {selectedSpace.name}, or record a meeting and KukuNotes will add them for you.</p>
+                      {selectedSpace.shared ? null : (
                       <button className="home-create-button" type="button" onClick={() => setCreateModal('task')}>
                         <FiPlus aria-hidden="true" size={15} />
                         New task
                       </button>
+                      )}
                     </div>
                   ) : null}
 
@@ -1060,6 +1082,8 @@ export const DashboardPage = ({
                         completedTaskIds={completedTaskIds}
                         openItemMenuId={openItemMenuId}
                         searchHitId={searchHitId}
+                        readOnly={selectedSpace.shared}
+                        senderName={selectedSpace.sharedByName}
                         onToggle={toggleTaskCompletion}
                         onMenuChange={setOpenItemMenuId}
                         onEdit={(task) => setEditTarget({ kind: 'task', task })}
@@ -1126,10 +1150,12 @@ export const DashboardPage = ({
                       </span>
                       <h3>No notes yet</h3>
                       <p>Capture ideas and decisions for {selectedSpace.name}, or let KukuNotes take notes from your meetings.</p>
+                      {selectedSpace.shared ? null : (
                       <button className="home-create-button" type="button" onClick={() => setCreateModal('note')}>
                         <FiPlus aria-hidden="true" size={15} />
                         New note
                       </button>
+                      )}
                     </div>
                   ) : null}
 
@@ -1141,6 +1167,8 @@ export const DashboardPage = ({
                         layout={noteLayout}
                         openItemMenuId={openItemMenuId}
                         searchHitId={searchHitId}
+                        readOnly={selectedSpace.shared}
+                        senderName={selectedSpace.sharedByName}
                         onMenuChange={setOpenItemMenuId}
                         onEdit={(note) => setEditTarget({ kind: 'note', note })}
                         onDelete={(note) =>
@@ -1184,6 +1212,7 @@ export const DashboardPage = ({
                     embedded
                     spaceId={selectedSpace.id}
                     spaceName={selectedSpace.name}
+                    readUserId={selectedSpace.shared ? selectedSpace.ownerUserId : undefined}
                   />
                 </section>
               ) : null}
@@ -1195,9 +1224,10 @@ export const DashboardPage = ({
                 >
                   {userId ? (
                     <SpaceMindmapSection
-                      userId={userId}
+                      userId={selectedSpace.shared ? selectedSpace.ownerUserId : userId}
                       spaceId={selectedSpace.id}
                       spaceName={selectedSpace.name}
+                      readOnly={selectedSpace.shared}
                     />
                   ) : (
                     <div className="home-empty-state">

@@ -4,6 +4,7 @@ import '@xyflow/react/dist/style.css';
 import { FiChevronsLeft, FiFolder, FiSearch } from 'react-icons/fi';
 
 import { useAppSelector } from '@/app/hooks';
+import { TeamTag } from '@/features/dashboard/TeamTag';
 import {
   SourceScopePicker,
   generationRequestFields,
@@ -14,7 +15,6 @@ import { usePlanGate } from '@/features/settings/PlanGateProvider';
 import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 import {
   useGenerateMindmapMutation,
-  useLazyGetLatestMindmapQuery,
   useLazyGetMindmapByIdQuery,
   type MindmapGraphPayload,
 } from '@/services/mindmapApi';
@@ -48,18 +48,14 @@ const MindmapSpacePrompt = ({
   spaceId,
   scope,
   onScopeChange,
-  onView,
   onGenerate,
-  viewBusy,
   generateBusy,
 }: {
   userId?: string;
   spaceId?: string;
   scope: GenerationScope;
   onScopeChange: (scope: GenerationScope) => void;
-  onView: () => void;
   onGenerate: () => void;
-  viewBusy?: boolean;
   generateBusy?: boolean;
 }) => (
   <div className="mindmap-prompt" role="region" aria-label="Mind map actions">
@@ -69,23 +65,15 @@ const MindmapSpacePrompt = ({
         spaceId={spaceId}
         value={scope}
         onChange={onScopeChange}
-        disabled={viewBusy || generateBusy}
+        disabled={generateBusy}
         variant="card"
       />
       <div className="mindmap-prompt__actions">
         <button
           type="button"
-          className="mindmap-prompt__btn mindmap-prompt__btn--secondary"
-          onClick={onView}
-          disabled={viewBusy || generateBusy}
-        >
-          {viewBusy ? 'Loading…' : 'View mind map'}
-        </button>
-        <button
-          type="button"
           className="mindmap-prompt__btn mindmap-prompt__btn--primary"
           onClick={onGenerate}
-          disabled={generateBusy || viewBusy || (scope.mode === 'date' && scope.dates.length === 0)}
+          disabled={generateBusy || (scope.mode === 'date' && scope.dates.length === 0)}
         >
           {generateBusy ? 'Starting…' : 'Generate mind map'}
         </button>
@@ -144,14 +132,11 @@ export const MindmapPage = () => {
   const [query, setQuery] = useState('');
   const [viewGraph, setViewGraph] = useState<MindmapGraphPayload>(emptyGraph);
   const [activeMindmapId, setActiveMindmapId] = useState<string | null>(null);
-  const [viewError, setViewError] = useState<string | null>(null);
-  const [isViewLoading, setIsViewLoading] = useState(false);
   const [generation, setGeneration] = useState<GenerationStatus | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const [generateMindmap, { isLoading: isStartingGenerate }] = useGenerateMindmapMutation();
-  const [fetchLatestMindmap] = useLazyGetLatestMindmapQuery();
   const [fetchMindmapById] = useLazyGetMindmapByIdQuery();
 
   const {
@@ -202,7 +187,6 @@ export const MindmapPage = () => {
       setGeneration(null);
       setViewGraph(emptyGraph);
       setActiveMindmapId(null);
-      setViewError(null);
       stopGenerationStream();
     }
   }, [activeSpaceId, spaces, stopGenerationStream]);
@@ -218,7 +202,6 @@ export const MindmapPage = () => {
       setGenerateError(null);
       setViewGraph(emptyGraph);
       setActiveMindmapId(null);
-      setViewError(null);
     },
     [stopGenerationStream],
   );
@@ -232,7 +215,6 @@ export const MindmapPage = () => {
       edges: Array.isArray(graph.edges) ? graph.edges : [],
     });
     setCanvasMode('view');
-    setViewError(null);
   }, [fetchMindmapById]);
 
   const handleStatusEvent = useCallback(
@@ -265,42 +247,12 @@ export const MindmapPage = () => {
     [loadGraphDocument, stopGenerationStream],
   );
 
-  const handleView = useCallback(async () => {
+  const handleGenerate = useCallback(async () => {
     if (!userId || !selectedSpace) {
       return;
     }
-    setIsViewLoading(true);
-    setViewError(null);
-    try {
-      const doc = await fetchLatestMindmap({ userId, spaceId: selectedSpace.id }).unwrap();
-      const graph = doc.graph ?? emptyGraph;
-      if (!graph.nodes?.length) {
-        setViewError('No mind map saved for this space yet. Generate one first.');
-        setViewGraph(emptyGraph);
-        setActiveMindmapId(null);
-        return;
-      }
-      setActiveMindmapId(doc.mindmapId || null);
-      setViewGraph({
-        nodes: graph.nodes,
-        edges: Array.isArray(graph.edges) ? graph.edges : [],
-      });
-      setCanvasMode('view');
-    } catch (error) {
-      const message =
-        error && typeof error === 'object' && 'status' in error && (error as { status?: number }).status === 404
-          ? 'No mind map saved for this space yet. Generate one first.'
-          : error instanceof Error
-            ? error.message
-            : 'Unable to load mind map';
-      setViewError(message);
-    } finally {
-      setIsViewLoading(false);
-    }
-  }, [fetchLatestMindmap, selectedSpace, userId]);
-
-  const handleGenerate = useCallback(async () => {
-    if (!userId || !selectedSpace) {
+    if (selectedSpace.shared) {
+      setGenerateError('This space is shared with you as view only.');
       return;
     }
 
@@ -473,7 +425,10 @@ export const MindmapPage = () => {
                   <FiFolder size={15} />
                 </span>
                 <span className="mindmap-spaces__meta">
-                  <strong>{space.name}</strong>
+                  <strong className="space-card-title">
+                    <span className="space-card-title__name">{space.name}</span>
+                    {space.shared ? <TeamTag senderName={space.sharedByName} /> : null}
+                  </strong>
                   <small>{space.updatedAtLabel}</small>
                 </span>
               </button>
@@ -513,20 +468,24 @@ export const MindmapPage = () => {
       <div className="mindmap-canvas-shell">
         {!selectedSpace ? (
           <div className="mindmap-prompt" role="region" aria-label="Select a space" />
+        ) : canvasMode === 'prompt' && selectedSpace.shared ? (
+          <div className="mindmap-prompt" role="region" aria-label="Team space">
+            <p className="mindmap-inline-error">
+              From {selectedSpace.sharedByName}. You can view this space, and you cannot generate a new mind map.
+            </p>
+          </div>
         ) : canvasMode === 'prompt' ? (
           <>
             <MindmapSpacePrompt
-              userId={userId}
+              userId={selectedSpace.shared ? selectedSpace.ownerUserId : userId}
               spaceId={selectedSpace.id}
               scope={generationScope}
               onScopeChange={setGenerationScope}
-              onView={() => void handleView()}
               onGenerate={() => void handleGenerate()}
-              viewBusy={isViewLoading}
               generateBusy={isStartingGenerate}
             />
-            {viewError || generateError ? (
-              <p className="mindmap-inline-error">{viewError || generateError}</p>
+            {generateError ? (
+              <p className="mindmap-inline-error">{generateError}</p>
             ) : null}
           </>
         ) : canvasMode === 'generate' ? (

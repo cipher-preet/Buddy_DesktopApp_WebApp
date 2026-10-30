@@ -62,10 +62,12 @@ export const MindmapCanvas = ({
   canvasKey,
   mindmapId,
   graph,
+  readOnly = false,
 }: {
   canvasKey: string;
   mindmapId?: string | null;
   graph: MindmapGraphPayload;
+  readOnly?: boolean;
 }) => {
   const { showToast } = useToast();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindmapCardData>>(graph.nodes ?? []);
@@ -97,6 +99,10 @@ export const MindmapCanvas = ({
 
   const removeNode = useCallback(
     async (nodeId: string) => {
+      if (readOnly) {
+        showToast({ message: 'This shared mind map is view only.', type: 'info' });
+        return;
+      }
       if (!mindmapId) {
         setNodes((current) => current.filter((node) => node.id !== nodeId));
         setEdges((current) =>
@@ -119,7 +125,7 @@ export const MindmapCanvas = ({
         throw error;
       }
     },
-    [mindmapId, removeMindmapNode, setEdges, setNodes, showToast],
+    [mindmapId, readOnly, removeMindmapNode, setEdges, setNodes, showToast],
   );
 
   const editContext = useMemo(
@@ -144,7 +150,9 @@ export const MindmapCanvas = ({
         fitViewOptions={{ padding: 0.2, duration: 0 }}
         minZoom={0.2}
         maxZoom={1.5}
-        nodeDragThreshold={0}
+        nodesDraggable={!readOnly}
+        nodesConnectable={false}
+        elementsSelectable={!readOnly}
         panOnScroll
         panOnScrollSpeed={1.15}
         zoomOnScroll
@@ -152,9 +160,6 @@ export const MindmapCanvas = ({
         zoomOnDoubleClick={false}
         panOnDrag
         selectionOnDrag={false}
-        nodesDraggable
-        nodesConnectable={false}
-        elementsSelectable
         elevateNodesOnSelect
         onlyRenderVisibleElements
         preventScrolling

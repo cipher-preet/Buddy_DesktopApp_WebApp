@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FiAlertCircle,
   FiArrowRight,
@@ -73,7 +73,7 @@ const fillChecklist = (step: GoalWorkspaceStep, data: GoalDashboard): GoalWorksp
     checklist,
     checklistDone: checklist.filter((item) => item.done).length,
     checklistTotal: checklist.length,
-    why: step.why || day?.focus || checklist.find((item) => item.why)?.why || '',
+    why: explainLine(step.title, step.why || day?.focus || '', day?.definitionOfDone || checklist.find((item) => item.definitionOfDone)?.definitionOfDone || ''),
     outcome: step.outcome || day?.definitionOfDone || checklist.find((item) => item.definitionOfDone)?.definitionOfDone || '',
     doneWhen: step.doneWhen || day?.definitionOfDone || checklist.map((item) => item.definitionOfDone).filter(Boolean).join(' '),
   };
@@ -87,7 +87,17 @@ const hydrateWorkspace = (workspace: GoalWorkspace, data: GoalDashboard): GoalWo
     ...week,
     steps: week.steps.map((step) => fillChecklist(step, data)),
   })),
+  strategies: workspace.strategies.map((strategy) => ({
+    ...strategy,
+    overview: explainLine(strategy.title, strategy.overview || '', strategy.body || ''),
+  })),
 });
+
+const explainLine = (heading: string, current: string, detail: string) => {
+  const options = [current, detail].map((item) => item.trim()).filter(Boolean);
+  if (options.length) return options.sort((left, right) => right.length - left.length)[0];
+  return heading.trim();
+};
 
 const modLabel = () => (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl');
 
@@ -117,7 +127,7 @@ const deriveWorkspace = (data: GoalDashboard): GoalWorkspace => {
       })),
       checklistDone: tasks.filter((task) => task.done).length,
       checklistTotal: tasks.length,
-      why: day.focus || '',
+      why: explainLine(day.title, day.focus || '', day.definitionOfDone || ''),
       outcome: day.definitionOfDone || '',
       doneWhen: day.definitionOfDone || '',
       notes: day.notes || '',
@@ -181,7 +191,7 @@ const deriveWorkspace = (data: GoalDashboard): GoalWorkspace => {
       id: strategy.id || `strategy-${index + 1}`,
       title: strategy.title,
       body: strategy.body,
-      overview: strategy.why || strategy.body,
+      overview: explainLine(strategy.title, strategy.why || '', strategy.body || ''),
       done: 0,
       total: strategy.proofPoints?.length || 0,
       percent: 0,
@@ -516,15 +526,14 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                   <div className="gw-today__row">
                     <div className="gw-daybadge">{openStep.dayIndex}</div>
                     <div className="gw-today__main">
-                      <p className="gw-today__label">TODAY’S STEP · DAY {openStep.dayIndex}</p>
+                      <p className="gw-today__label">TODAY’S STEP</p>
                       <h2>
                         {openStep.title}
                         {openStep.example ? <span className="gw-chip">example</span> : null}
                       </h2>
                       <div className="gw-meta">
-                        <span><FiLayers size={13} aria-hidden="true" />{openStep.category}</span>
                         <span><FiClock size={13} aria-hidden="true" />~{openStep.minutes} min</span>
-                        <span><FiList size={13} aria-hidden="true" />{openStep.checklistDone}/{openStep.checklistTotal || 0} done</span>
+                        <span><FiList size={13} aria-hidden="true" />{openStep.checklistDone}/{openStep.checklistTotal || 0}</span>
                       </div>
                     </div>
                     <div className="gw-today__actions">
@@ -545,20 +554,18 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                       </div>
                     </div>
                   ) : (
-                    <>
-                      <div className="gw-coach"><FiZap size={15} aria-hidden="true" /><p>{workspace.coach.text}</p></div>
-                      {workspace.coach.evidence.length ? (
-                        <div className="gw-evidence">
-                          {workspace.coach.evidence.map((item) => (
-                            <span key={item.id || item.label} className="gw-pill">{item.kind}{item.dateLabel ? ` · ${item.dateLabel}` : ''} · {item.label}</span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
+                    <div className="gw-coach"><FiZap size={15} aria-hidden="true" /><p>{workspace.coach.text}</p></div>
                   )}
                 </article>
               ) : (
-                <article className="gw-empty"><h3>No open step</h3><p>Every planned step is done or skipped.</p></article>
+                <article className="gw-empty">
+                  <h3>{workspace.stepsTotal === 0 ? 'No steps yet' : 'No open step'}</h3>
+                  <p>
+                    {workspace.stepsTotal === 0
+                      ? 'This plan does not have any steps yet. Go back and generate the plan again.'
+                      : 'Every planned step is done or skipped.'}
+                  </p>
+                </article>
               )}
 
               <div className="gw-timeline-head">
@@ -594,8 +601,8 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                           <button type="button" className="gw-step-open" onClick={() => setDialog({ kind: 'step', id: step.id })}>
                             <span className="gw-mark is-overdue" />
                             <span>
-                              <strong>D{step.dayIndex} · {step.title}</strong>
-                              <small style={{ display: 'block', color: '#8b919e' }}>{step.category} · {step.checklistDone}/{step.checklistTotal} checklist</small>
+                              <strong>{step.dayIndex}. {step.title}</strong>
+                              <small style={{ display: 'block', color: '#8b919e' }}>{step.checklistDone}/{step.checklistTotal}</small>
                             </span>
                           </button>
                           <button type="button" className="gw-overdue gw-linkish" onClick={() => { setRescheduleMode('move'); setDialog({ kind: 'reschedule', id: step.id }); }}>
@@ -626,11 +633,11 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                               </span>
                               <span className="gw-step-copy">
                                 <strong>
-                                  <span>D{step.dayIndex}</span>
+                                  <span>{step.dayIndex}</span>
                                   {step.title}
                                   {step.example ? <span className="gw-chip">example</span> : null}
                                 </strong>
-                                <small>{step.category} · {step.checklistDone}/{step.checklistTotal} checklist</small>
+                                <small>{step.checklistTotal ? `${step.checklistDone}/${step.checklistTotal}` : step.dateLabel}</small>
                               </span>
                             </button>
                             {editingDateId === step.id ? (
@@ -669,10 +676,9 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
                   </div>
                   <div className="gw-stats">
                     <div className="gw-stat"><b>{workspace.stepsDone}/{workspace.stepsTotal}</b><small>Steps</small></div>
-                    <div className="gw-stat"><b>{workspace.metric.current ?? 0}/{workspace.metric.target ?? '—'}</b><small>{workspace.metric.label}*</small></div>
-                    <div className="gw-stat"><b>{workspace.metric.streak}</b><small>Day streak*</small></div>
+                    <div className="gw-stat"><b>{workspace.metric.current ?? 0}/{workspace.metric.target ?? '—'}</b><small>{workspace.metric.label}</small></div>
+                    <div className="gw-stat"><b>{workspace.metric.streak}</b><small>Day streak</small></div>
                   </div>
-                  <p className="gw-chart-foot" style={{ margin: '10px 0 0' }}>* {workspace.metric.label.toLowerCase()}, streak, chart and dates come from this goal.</p>
                 </section>
                 <section className="gw-card">
                   <p className="gw-side-label"><FiTrendingUp size={13} aria-hidden="true" /> REAL VS TARGETED</p>
@@ -897,10 +903,8 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
             if (!item) return null;
             return (
               <>
-                <p className="gw-lead">Recommended for this goal</p>
                 <h2>{item.title}</h2>
-                <p className="gw-lead">{item.reason}</p>
-                <p className="gw-lead">Window · {item.windowLabel || 'This goal'}</p>
+                {item.reason ? <p className="gw-lead">{item.reason}</p> : null}
                 {item.howSteps.length ? (
                   <>
                     <div className="gw-section-label"><span>HOW TO USE THIS</span></div>
@@ -958,32 +962,10 @@ export const GoalDetailPage = ({ goalId, onBack }: GoalDetailPageProps) => {
   );
 };
 
-const EvidenceNote = ({
-  item,
-}: {
-  item: { id?: string; label: string; kind: string; dateLabel?: string };
-}) => {
-  const copyRef = useRef<HTMLParagraphElement>(null);
-  const [open, setOpen] = useState(false);
-  const [canToggle, setCanToggle] = useState(item.label.length > 180);
-
-  useEffect(() => {
-    const node = copyRef.current;
-    if (!node || open) return;
-    setCanToggle(node.scrollHeight > node.clientHeight + 2);
-  }, [item.label, open]);
-
-  return (
-    <div className={`gw-panel gw-evidence-card${open ? ' is-open' : ''}`}>
-      <small>{item.kind}{item.dateLabel ? ` · ${item.dateLabel}` : ''}</small>
-      <p ref={copyRef}>{item.label}</p>
-      {canToggle ? (
-        <button type="button" className="gw-more" onClick={() => setOpen((value) => !value)}>
-          {open ? 'See less' : 'See more'}
-        </button>
-      ) : null}
-    </div>
-  );
+const usefulLine = (value: string, title: string) => {
+  const text = value.trim();
+  if (!text || text.toLowerCase() === title.trim().toLowerCase()) return '';
+  return text;
 };
 
 const Modal = ({
@@ -1041,9 +1023,11 @@ const StepDialog = ({
   onNext: () => void;
 }) => {
   if (!step) return null;
+  const outcome = usefulLine(step.outcome || step.doneWhen || '', step.title);
+  const when = step.date === workspace.today ? `Today · ${step.dateLabel}` : step.dateLabel;
   return (
     <Modal
-      kicker={`Timeline · Day ${step.dayIndex} of ${workspace.horizonDays}`}
+      kicker={`Step ${step.dayIndex} of ${workspace.stepsTotal}`}
       onClose={onClose}
       footer={
         celebrate ? (
@@ -1062,62 +1046,41 @@ const StepDialog = ({
       {celebrate ? (
         <div className="gw-done-banner">
           <div className="gw-trophy" aria-hidden="true"><FiCheckCircle size={28} strokeWidth={1.75} /></div>
-          <h2>Day {step.dayIndex} done. Nice work!</h2>
+          <h2>Day {step.dayIndex} done.</h2>
           <p className="gw-lead">{step.title}</p>
         </div>
       ) : (
         <>
-          <p className="gw-lead" style={{ color: '#4d6fd4', fontWeight: 650, letterSpacing: '0.04em', fontSize: 12 }}>
-            {step.date === workspace.today ? `TODAY · DUE ${step.dateLabel.toUpperCase()}` : step.dateLabel.toUpperCase()}
-          </p>
-          <h2>{step.title} {step.example ? <span className="gw-chip">example</span> : null}</h2>
-          <p className="gw-lead">Part of “{step.partOf}”.</p>
-          <dl className="gw-fact">
-            <dt>Why</dt>
-            <dd>{step.why || 'This step moves the goal forward.'}</dd>
-            <dt>Outcome</dt>
-            <dd>{step.outcome || step.doneWhen || 'Done when every checklist step is finished.'}</dd>
-          </dl>
-          {onReschedule ? <button type="button" className="gw-btn" onClick={onReschedule}><FiCalendar size={14} aria-hidden="true" /> Reschedule</button> : null}
+          <div className="gw-step-date">
+            <p>{when}</p>
+            {onReschedule ? (
+              <button type="button" className="gw-linkish" onClick={onReschedule}>
+                <FiCalendar size={14} aria-hidden="true" /> Reschedule
+              </button>
+            ) : null}
+          </div>
+          <h2>{step.title}</h2>
+          {outcome ? <p className="gw-lead">{outcome}</p> : null}
         </>
       )}
-      <div className="gw-grid-2" style={{ marginTop: 12 }}>
-        <div>
+      {step.checklist.length ? (
+        <div className="gw-check-block">
           <div className="gw-check-head">
-            <span>CHECKLIST</span>
+            <span>Checklist</span>
             <span>{step.checklistDone} of {step.checklistTotal}</span>
           </div>
-          <div className={`gw-check-bar${step.checklistTotal > 0 && step.checklistDone === step.checklistTotal ? ' is-done' : ''}`}>
-            <span style={{ width: `${step.checklistTotal ? (step.checklistDone / step.checklistTotal) * 100 : 0}%` }} />
-          </div>
-          {step.checklist.length === 0 ? <p className="gw-lead">This step has no checklist items yet.</p> : null}
-          {step.checklist.map((item, index) => (
+          {step.checklist.map((item) => (
             <label key={item.id} className={`gw-check${item.done ? ' is-on' : ''}`}>
               <input type="checkbox" checked={item.done} onChange={(event) => onTick(item.id, event.target.checked)} />
               <span className="gw-check__copy">
                 <span>{item.text}</span>
-                {item.why ? <small>{item.why}</small> : null}
-                {item.definitionOfDone ? <small>Done when {item.definitionOfDone}</small> : null}
               </span>
-              <span className="gw-kbd">{index + 1}</span>
             </label>
           ))}
         </div>
-        <div>
-          <div className="gw-section-label"><span>DONE WHEN</span></div>
-          <div className="gw-panel">{step.doneWhen || 'The checklist is finished and the outcome is true.'}</div>
-          {workspace.coach.evidence.length ? (
-            <>
-              <div className="gw-section-label" style={{ marginTop: 14 }}><span>EVIDENCE</span></div>
-              {workspace.coach.evidence.map((item) => (
-                <EvidenceNote key={item.id || item.label} item={item} />
-              ))}
-            </>
-          ) : null}
-        </div>
-      </div>
-      <div className="gw-section-label" style={{ marginTop: 8 }}><span>NOTES</span><span style={{ fontWeight: 500, letterSpacing: 0 }}>Autosaves</span></div>
-      <textarea className="gw-notes" value={note} placeholder="Blockers, decisions, evidence, or next steps…" onChange={(event) => onNote(event.target.value)} onBlur={onSaveNote} />
+      ) : null}
+      <label className="gw-notes-label" htmlFor={`step-note-${step.id}`}>Notes</label>
+      <textarea id={`step-note-${step.id}`} className="gw-notes" value={note} placeholder="Add a note" onChange={(event) => onNote(event.target.value)} onBlur={onSaveNote} />
     </Modal>
   );
 };
@@ -1133,18 +1096,19 @@ const StrategyDialog = ({
 }) => {
   if (!item) return null;
   return (
-    <Modal kicker="Strategies" onClose={onClose} footer={<button type="button" className="gw-btn" onClick={onClose}>Close</button>}>
-      <Ring value={item.percent} tone={item.percent >= 100 ? 'green' : 'blue'} />
+    <Modal kicker="Strategy" onClose={onClose} footer={<button type="button" className="gw-btn" onClick={onClose}>Close</button>}>
       <h2>{item.title}</h2>
-      <p className="gw-lead">{item.done} of {item.total} linked steps done · {item.windowLabel}</p>
-      <p className="gw-lead">{item.overview}</p>
-      <div className="gw-section-label"><span>LINKED STEPS</span></div>
-      {item.linkedSteps.length === 0 ? <p className="gw-lead">No steps are linked to this strategy yet.</p> : null}
-      {item.linkedSteps.map((step) => (
-        <button key={step.id} type="button" className="gw-choice" onClick={() => onOpenStep(step.id)}>
-          <span><strong>{step.done ? <FiCheck size={14} aria-hidden="true" /> : <FiCircle size={14} aria-hidden="true" />} {step.title}</strong><small>{step.dayLabel}</small></span>
-        </button>
-      ))}
+      {usefulLine(item.overview || '', item.title) ? <p className="gw-lead">{usefulLine(item.overview || '', item.title)}</p> : null}
+      {item.linkedSteps.length ? (
+        <>
+          <div className="gw-section-label"><span>Linked steps</span></div>
+          {item.linkedSteps.map((step) => (
+            <button key={step.id} type="button" className="gw-choice" onClick={() => onOpenStep(step.id)}>
+              <span><strong>{step.done ? <FiCheck size={14} aria-hidden="true" /> : <FiCircle size={14} aria-hidden="true" />} {step.title}</strong><small>{step.dayLabel}</small></span>
+            </button>
+          ))}
+        </>
+      ) : null}
     </Modal>
   );
 };

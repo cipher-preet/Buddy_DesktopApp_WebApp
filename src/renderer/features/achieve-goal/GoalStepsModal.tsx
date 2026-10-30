@@ -1,23 +1,20 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FiCheck, FiX } from 'react-icons/fi';
 
-import { useAppSelector } from '@/app/hooks';
 import { getApiErrorMessage } from '@/services/apiErrors';
 import {
   useActivateGoalMutation,
   useAnswerGoalMutation,
   useGetGoalSetupQuery,
   useRetryGoalJobMutation,
-  useSetGoalSpacesMutation,
   type GoalStep,
 } from '@/services/goalsApi';
-import { useGetUserSpacesInfiniteQuery } from '@/services/homeApi';
 
 const WAIT_MS = 300000;
 
 const stageCopy = (jobType: string | undefined) => {
-  if (jobType === 'baseline') return 'Reading your Space';
+  if (jobType === 'baseline') return 'Building your plan';
   if (jobType === 'plan') return 'Building your expert execution plan';
   return 'Understanding your goal';
 };
@@ -31,30 +28,23 @@ type GoalStepsModalProps = {
 export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalProps) => {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const userId = useAppSelector((state) => state.auth.user?.userId) || '';
   const [timedOut, setTimedOut] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [textValue, setTextValue] = useState('');
-  const [selectedSpaces, setSelectedSpaces] = useState<string[]>([]);
   const [actionError, setActionError] = useState('');
   const [pollMs, setPollMs] = useState(1500);
 
   const { data, isLoading, isError, error, refetch } = useGetGoalSetupQuery(goalId, {
     pollingInterval: pollMs,
   });
-  const spacesQuery = useGetUserSpacesInfiniteQuery(
-    { userId, limit: 20, counts: 'none' },
-    { skip: !userId || data?.goal.latestStep?.control !== 'space_picker' },
-  );
   const [answerGoal, answerState] = useAnswerGoalMutation();
-  const [setGoalSpaces, spacesState] = useSetGoalSpacesMutation();
   const [activateGoal, activateState] = useActivateGoalMutation();
   const [retryJob, retryState] = useRetryGoalJobMutation();
 
   const job = data?.job ?? null;
   const step = data?.goal.latestStep ?? null;
   const waiting = Boolean(data) && (job?.status === 'queued' || job?.status === 'running');
-  const busy = isLoading || waiting || answerState.isLoading || spacesState.isLoading || activateState.isLoading || retryState.isLoading;
+  const busy = isLoading || waiting || answerState.isLoading || activateState.isLoading || retryState.isLoading;
 
   useEffect(() => {
     if (isError) {
@@ -106,11 +96,6 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
     setActionError('');
   }, [step?.stepId]);
 
-  const spaces = useMemo(
-    () => spacesQuery.data?.pages.flatMap((page) => page.spaces) ?? [],
-    [spacesQuery.data],
-  );
-
   const progress = data?.goal.completeness ?? (isLoading ? 8 : 12);
   const failed = job?.status === 'failed' || isError || (job?.status === 'ready' && !step);
   const showWait = (isLoading || waiting) && !failed;
@@ -118,7 +103,12 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
 
   const canContinue = () => {
     if (busy || failed || !step) return false;
-    if (step.control === 'space_picker' || step.control === 'confirm_baseline' || step.control === 'plan_review') {
+    if (
+      step.control === 'space_picker' ||
+      step.control === 'confirm_baseline' ||
+      step.control === 'plan_review' ||
+      step.control === 'brief'
+    ) {
       return true;
     }
     if (step.control === 'single_select') return selectedOptions.length === 1 || textValue.trim().length > 0;
@@ -145,6 +135,7 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
       return textValue.trim() || selected?.label || '';
     }
     if (current.control === 'confirm_baseline') return textValue.trim() || 'Looks right';
+    if (current.control === 'brief') return 'Continue';
     return textValue.trim();
   };
 
@@ -153,7 +144,7 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
     setActionError('');
     try {
       if (step.control === 'space_picker') {
-        await setGoalSpaces({ goalId, spaceIds: selectedSpaces }).unwrap();
+        await answerGoal({ goalId, stepId: step.stepId, value: 'Continue' }).unwrap();
         return;
       }
       if (step.control === 'plan_review') {
@@ -225,9 +216,19 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
 
             {!showWait && !failed && step ? (
               <>
+                {step.note ? <p className="goal-steps-lead">{step.note}</p> : null}
                 <h2 id={titleId} className="goal-steps-modal__title">
                   {step.prompt}
                 </h2>
+                {step.brief?.length ? (
+                  <ol className="goal-steps-plan">
+                    {step.brief.map((line) => (
+                      <li key={line}>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
                 {step.control === 'text' ? (
                   <textarea
                     className="goal-steps-modal__textarea"
@@ -276,45 +277,9 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
                   />
                 ) : null}
                 {step.control === 'space_picker' ? (
-                  <div className="goal-steps-options" role="group" aria-label="Spaces">
-                    {spacesQuery.isLoading ? <p className="goal-steps-note">Loading your Spaces…</p> : null}
-                    {spacesQuery.isError ? (
-                      <p className="goal-steps-note">{getApiErrorMessage(spacesQuery.error, 'Unable to load Spaces.')}</p>
-                    ) : null}
-                    {!spacesQuery.isLoading && spaces.length === 0 ? (
-                      <p className="goal-steps-note">
-                        You don’t have a Space yet. You can continue, and the next step will recommend how to organize this goal.
-                      </p>
-                    ) : null}
-                    {spaces.map((space) => {
-                      const selected = selectedSpaces.includes(space.id);
-                      return (
-                        <button
-                          key={space.id}
-                          type="button"
-                          className={`goal-steps-option${selected ? ' is-selected' : ''}`}
-                          aria-pressed={selected}
-                          onClick={() =>
-                            setSelectedSpaces((current) =>
-                              current.includes(space.id)
-                                ? current.filter((id) => id !== space.id)
-                                : [...current, space.id],
-                            )
-                          }
-                        >
-                          <span className="goal-steps-option__check" aria-hidden="true">
-                            {selected ? <FiCheck size={12} strokeWidth={3} /> : null}
-                          </span>
-                          <span>{space.name}</span>
-                        </button>
-                      );
-                    })}
-                    {spacesQuery.hasNextPage ? (
-                      <button type="button" className="goal-steps-modal__back" onClick={() => spacesQuery.fetchNextPage()}>
-                        More Spaces
-                      </button>
-                    ) : null}
-                  </div>
+                  <p className="goal-steps-note">
+                    This plan is built from your goal and deadline. Continue to generate it.
+                  </p>
                 ) : null}
                 {step.control === 'confirm_baseline' ? (
                   <div className="goal-steps-findings">
@@ -340,6 +305,26 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
                       <div className="goal-steps-expert__brief">
                         {step.mission ? <p className="goal-steps-expert__mission">{step.mission}</p> : null}
                         {step.recommendation ? <p>{step.recommendation}</p> : null}
+                      </div>
+                    ) : null}
+                    {step.realityCheck && step.realityCheck !== step.recommendation ? <p>{step.realityCheck}</p> : null}
+                    {step.primaryFocus || step.secondaryFocus ? (
+                      <div className="goal-steps-expert__strategies">
+                        <h3>Who to start with</h3>
+                        <ul>
+                          {step.primaryFocus ? (
+                            <li>
+                              <strong>First</strong>
+                              <span>{step.primaryFocus}</span>
+                            </li>
+                          ) : null}
+                          {step.secondaryFocus ? (
+                            <li>
+                              <strong>Later</strong>
+                              <span>{step.secondaryFocus}</span>
+                            </li>
+                          ) : null}
+                        </ul>
                       </div>
                     ) : null}
                     {(step.successDefinition?.metrics ?? []).length > 0 ? (
@@ -383,12 +368,58 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
                     )}
                     {(step.strategies ?? []).length > 0 ? (
                       <div className="goal-steps-expert__strategies">
-                        <h3>Strategies</h3>
+                        <h3>Paths to use</h3>
                         <ul>
                           {(step.strategies ?? []).slice(0, 4).map((strategy) => (
                             <li key={strategy.id || strategy.title}>
                               <strong>{strategy.title}</strong>
                               <span>{strategy.body}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {(step.resourceSplit ?? []).length > 0 ? (
+                      <div className="goal-steps-expert__strategies">
+                        <h3>Budget</h3>
+                        <ul>
+                          {(step.resourceSplit ?? []).map((row) => (
+                            <li key={row.item}>
+                              <strong>{row.item}</strong>
+                              <span>{row.amount}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {step.starter ? (
+                      <div className="goal-steps-expert__brief">
+                        <p className="goal-steps-expert__mission">A starting line you can adapt</p>
+                        <p>{step.starter}</p>
+                      </div>
+                    ) : null}
+                    {(step.assumptions ?? []).length > 0 ? (
+                      <div className="goal-steps-expert__strategies">
+                        <h3>Assumptions</h3>
+                        <ul>
+                          {(step.assumptions ?? []).slice(0, 4).map((item) => (
+                            <li key={item}>
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {(step.openQuestions ?? [])[0] ? (
+                      <div className="goal-steps-expert__strategies">
+                        <h3>First move</h3>
+                        <ul>
+                          <li>
+                            <span>{step.openQuestions?.[0]?.prompt}</span>
+                          </li>
+                          {(step.openQuestions?.[0]?.options ?? []).map((option) => (
+                            <li key={option.id}>
+                              <strong>{option.label}</strong>
                             </li>
                           ))}
                         </ul>
@@ -411,7 +442,7 @@ export const GoalStepsModal = ({ goalId, onClose, onActivated }: GoalStepsModalP
               </button>
             ) : (
               <button type="button" className="goal-steps-modal__next" onClick={handleNext} disabled={!canContinue()}>
-                {step?.control === 'plan_review' ? 'Approve' : 'Next'}
+                {step?.control === 'plan_review' ? 'Approve' : step?.control === 'brief' ? 'Build my plan' : 'Next'}
               </button>
             )}
           </div>
